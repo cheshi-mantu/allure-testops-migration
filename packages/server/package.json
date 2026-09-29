@@ -1,0 +1,24 @@
+{
+  "name": "@atm/server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "dev": "tsx watch src/index.ts"
+  },
+  "dependencies": {
+    "@atm/shared": "0.1.0",
+    "@fastify/static": "^10.1.5",
+    "fastify": "^5.12.5",
+    "turndown": "^7.2.4",
+    "undici": "^8.11.2",
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@types/turndown": "^5.0.6",
+    "@atm/mocks": "0.1.0"
+  }
+}

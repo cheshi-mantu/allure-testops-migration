@@ -1,0 +1,23 @@
+# Allure TestOps migration tool for end users.
+#
+#   docker compose up -d
+#   open http://localhost:8080
+#
+# Profiles (connections, mappings) and run logs are kept in the "migration-data" volume,
+# so they survive restarts and upgrades. Profiles can also be exported to JSON in the UI.
+
+services:
+  migration:
+    image: ${MIGRATION_IMAGE:-ghcr.io/qameta/allure-testops-migration:latest}
+    restart: unless-stopped
+    ports:
+      # The UI has no login of its own: it is published on this machine only.
+      # Change to "8080:8080" only on a trusted network.
+      - "127.0.0.1:${MIGRATION_PORT:-8080}:8080"
+    environment:
+      LOG_LEVEL: info
+    volumes:
+      - migration-data:/data
+
+volumes:
+  migration-data:

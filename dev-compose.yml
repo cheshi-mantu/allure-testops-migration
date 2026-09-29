@@ -1,0 +1,39 @@
+# Local build and tests.
+#
+#   docker compose -f dev-compose.yml up --build            # app + fake TestRail/TestOps
+#   docker compose -f dev-compose.yml run --rm --build tests # unit and end-to-end tests
+#
+# In the UI use these connections to try everything without real servers:
+#   TestRail        http://mocks:4001   user demo@example.com   API key demo-api-key
+#   Allure TestOps  http://mocks:4002   API token demo-api-token
+
+services:
+  app:
+    build:
+      context: .
+      target: app
+    ports:
+      - "127.0.0.1:8080:8080"
+    environment:
+      LOG_LEVEL: debug
+    volumes:
+      - dev-data:/data
+    depends_on:
+      - mocks
+
+  mocks:
+    build:
+      context: .
+      target: mocks
+    ports:
+      - "127.0.0.1:4001:4001"
+      - "127.0.0.1:4002:4002"
+
+  tests:
+    build:
+      context: .
+      target: test
+    profiles: ["test"]
+
+volumes:
+  dev-data:

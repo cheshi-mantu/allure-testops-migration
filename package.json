@@ -1,0 +1,32 @@
+{
+  "name": "allure-testops-migration",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Migrate test cases from other test management systems into Allure TestOps",
+  "license": "Apache-2.0",
+  "type": "module",
+  "workspaces": [
+    "packages/shared",
+    "packages/mocks",
+    "packages/server",
+    "packages/web"
+  ],
+  "engines": {
+    "node": ">=22.12"
+  },
+  "scripts": {
+    "build": "npm run build -w @atm/shared && npm run build -w @atm/server && npm run build -w @atm/web && npm run build -w @atm/mocks",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "test": "vitest run",
+    "dev:server": "npm run dev -w @atm/server",
+    "dev:web": "npm run dev -w @atm/web",
+    "dev:mocks": "npm run dev -w @atm/mocks",
+    "start": "node packages/server/dist/index.js"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.2"
+  }
+}
