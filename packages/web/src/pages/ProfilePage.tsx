@@ -123,7 +123,7 @@ const CSV_STEPS: StepDef[] = [
     label: "Sections",
     description: "Path column levels → custom fields",
     icon: <IconHierarchy2 size={16} />,
-    done: (p) => Boolean(p.csv.pathColumn && p.structure.levels.some(Boolean)),
+    done: (p) => p.csv.withoutPath || Boolean(p.csv.pathColumn && p.structure.levels.some(Boolean)),
     render: () => <StructureStep />,
   },
   {

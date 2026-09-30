@@ -107,6 +107,8 @@ export const CsvSourceSchema = z.object({
   rows: z.enum(["auto", "single", "multi"]).default("auto"),
   /** Column holding the section path, e.g. `Web > Checkout > Payment`. Its levels are mapped like TestRail sections. */
   pathColumn: z.string().nullable().default(null),
+  /** The user decided the file has no section path: no hints or warnings about it. */
+  withoutPath: z.boolean().default(false),
   /** Separator between path levels, `auto` detects ` > `, `/`, `\\`, `»`, `::` or `|`. */
   pathSeparator: z.string().default("auto"),
   /** Trial run: only cases with these ids or names. Empty means all. */

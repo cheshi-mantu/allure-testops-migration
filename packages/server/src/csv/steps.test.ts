@@ -61,6 +61,12 @@ describe("parseSteps", () => {
 });
 
 describe("real world step layouts", () => {
+  it("keeps a single numbered step with continuation lines as one step", () => {
+    const options = { ...auto, expectedPattern: "(?i)expected( result)?:" };
+    const steps = parseSteps("1. Quit the app\nRemove its folder\nRemove its settings\nExpected Result:\nThe app is uninstalled", options);
+    expect(view(steps)).toEqual([{ body: "Quit the app\nRemove its folder\nRemove its settings", expected: "The app is uninstalled" }]);
+  });
+
   it("splits steps written with markers on one line", () => {
     expect(view(parseSteps("Step: open the app Step: log in Step: check the page", auto))).toEqual([
       { body: "open the app" },
@@ -108,5 +114,15 @@ describe("expected results from a separate column", () => {
     const steps = parseSteps("Open\nClick", auto);
     attachExpected(steps, ["All good"]);
     expect(view(steps)).toEqual([{ body: "Open" }, { body: "Click", expected: "All good" }]);
+  });
+
+  it("does not repeat expected results the steps column already holds", () => {
+    const options = { ...auto, expectedPattern: "(?i)expected( result)?:" };
+    const steps = parseSteps("1. Launch the installer\nExpected Result:\nLaunched\n2. Tap on Cancel\nExpected Result:\nClosed", options);
+    attachExpected(steps, parseExpectedTexts("1. Launched\n2. Closed and  notified", options));
+    expect(view(steps)).toEqual([
+      { body: "Launch the installer", expected: "Launched" },
+      { body: "Tap on Cancel", expected: "Closed\nClosed and  notified" },
+    ]);
   });
 });

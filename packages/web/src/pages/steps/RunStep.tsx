@@ -60,7 +60,9 @@ function problems(profile: Profile): string[] {
 function warnings(profile: Profile): string[] {
   const list: string[] = [];
   if (profile.source === "csv" && !profile.csv.pathColumn) {
-    list.push("No section path column is chosen, so cases will not be grouped into sections.");
+    if (!profile.csv.withoutPath) {
+      list.push("No section path column is chosen, so cases will not be grouped into sections.");
+    }
   } else if (!profile.structure.levels.some(Boolean) && !profile.structure.suiteField) {
     list.push("No suite or section level is mapped, so the source structure will not be kept.");
   }

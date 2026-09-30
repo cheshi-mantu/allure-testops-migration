@@ -468,8 +468,7 @@ export class Run {
         }
       }
     }
-    const structureFields = [this.profile.structure.suiteField, ...this.profile.structure.levels].filter(Boolean);
-    if (this.profile.structure.createTree && structureFields.length > 0) {
+    if (this.profile.structure.createTree && this.structureFieldNames().length > 0) {
       const exists = target.trees.some((tree) => tree.name === this.profile.structure.treeName);
       this.log("info", exists ? `Tree "${this.profile.structure.treeName}" already exists and is kept.` : `Tree "${this.profile.structure.treeName}" will be created.`);
     }
@@ -488,11 +487,19 @@ export class Run {
     this.emitSummary();
   }
 
+  /** Custom fields of the suite and section levels; none for a CSV file without a section path column. */
+  private structureFieldNames(): string[] {
+    const structure = this.profile.structure;
+    if (this.profile.source === "csv" && !this.profile.csv.pathColumn) {
+      return [];
+    }
+    return [...new Set([structure.suiteField, ...structure.levels].filter((name): name is string => Boolean(name)))];
+  }
+
   /** Creates the structure custom fields up front and the tree built from them. */
   private async prepareStructure(testops: TestOpsClient, targets: TargetResolver, projectId: number) {
     const structure = this.profile.structure;
-    const names = [structure.suiteField, ...structure.levels].filter((name): name is string => Boolean(name));
-    const unique = [...new Set(names)];
+    const unique = this.structureFieldNames();
     const fields = [];
     for (const name of unique) {
       fields.push(await targets.customField(name));

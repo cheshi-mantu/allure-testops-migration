@@ -62,7 +62,8 @@ export function detectStepFormat(text: string): DetectedStepFormat {
   if (lines.some((l) => (l.match(INLINE_MARKER)?.length ?? 0) >= 2)) {
     return "inline";
   }
-  if (lines.filter((l) => NUMBERED_LINE.test(l)).length >= 2) {
+  // A single "1. ..." with continuation lines is one numbered step too.
+  if (lines.filter((l) => NUMBERED_LINE.test(l)).length >= 2 || /^\s*1[.)]\s/.test(lines[0]!)) {
     return "numbered";
   }
   if (lines.slice(1).some((l) => /^(\t| {2,})\S/.test(l))) {
@@ -323,7 +324,13 @@ export function attachExpected(steps: PlannedStep[], expected: (ExpectedItem | s
   if (targets.length === 0 || items.length === 0) {
     return;
   }
+  const lines = (text: string) => text.split("\n").map((l) => l.replace(/\s+/g, " ").trim()).filter(Boolean);
   const add = (target: Step, text: string) => {
+    // The steps column may already hold this expected result ("Expected Result: ..." under the step).
+    const known = new Set(lines(target.expected ?? ""));
+    if (target.expected && lines(text).every((l) => known.has(l))) {
+      return;
+    }
     target.expected = target.expected ? `${target.expected}\n${text}` : text;
   };
   if (items.length === 1 && items[0]!.number === undefined && targets.length > 1) {

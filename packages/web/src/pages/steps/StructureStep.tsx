@@ -37,9 +37,11 @@ function PathColumnCard() {
   const info = source.data?.csv;
   const columns = source.data?.fields.map((f) => f.systemName) ?? [];
   const candidates = info?.pathCandidates ?? [];
+  const off = profile.csv.withoutPath;
   const choose = (column: string | null) => {
     update((p) => {
       p.csv.pathColumn = column;
+      p.csv.withoutPath = false;
       p.csv.pathSeparator = "auto";
       // The path column feeds the levels; do not also migrate it as a plain field.
       const mapping = p.fields.find((m) => m.source === column);
@@ -57,6 +59,25 @@ function PathColumnCard() {
           A column like <i>Web &gt; Checkout &gt; Payment</i> or <i>/Web/Checkout/Payment</i> describes where a case sits. Its levels are
           mapped below.
         </Text>
+        <Switch
+          label="Do not use a section path"
+          description="Cases are not grouped by sections, and the tool stops suggesting a path column."
+          checked={off}
+          onChange={(event) => {
+            const checked = event.currentTarget.checked;
+            if (checked) {
+              update((p) => {
+                p.csv.pathColumn = null;
+                p.csv.pathSeparator = "auto";
+                p.csv.withoutPath = true;
+              });
+              void refreshDiscovery("source");
+            } else {
+              update((p) => void (p.csv.withoutPath = false));
+            }
+          }}
+        />
+        {!off && (
         <Group align="flex-end">
           <Select
             label="Column"
@@ -87,7 +108,8 @@ function PathColumnCard() {
             />
           )}
         </Group>
-        {!profile.csv.pathColumn && candidates.length > 0 && (
+        )}
+        {!off && !profile.csv.pathColumn && candidates.length > 0 && (
           <Alert color="blue">
             "{candidates[0]!.column}" looks like a section path.{" "}
             <Anchor component="button" type="button" onClick={() => choose(candidates[0]!.column)}>
@@ -305,6 +327,7 @@ function StructureEditor() {
         </Card>
       )}
 
+      {(!csv || profile.csv.pathColumn) && (
       <Card withBorder>
         <Stack>
           <Title order={4}>Tree</Title>
@@ -348,8 +371,9 @@ function StructureEditor() {
           )}
         </Stack>
       </Card>
+      )}
 
-      {discovery.structure.some((suite) => suite.examplePaths.length > 0) && (
+      {(!csv || profile.csv.pathColumn) && discovery.structure.some((suite) => suite.examplePaths.length > 0) && (
       <Card withBorder>
         <Stack gap="xs">
           <Title order={4}>Examples</Title>

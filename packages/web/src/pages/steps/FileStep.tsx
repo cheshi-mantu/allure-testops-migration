@@ -72,14 +72,22 @@ export function FileStep() {
     update((p) => void (p.csv[key] = value));
     forgetDiscovery();
   };
+  // Ids like 1, 2, 3 repeat between files: a tag prefix per file keeps two imports into one project apart.
+  // A prefix made from the previous file follows the new file; one the user typed stays.
+  const followFile = (p: typeof profile, fileName: string) => {
+    const previous = files.data?.find((f) => f.id === p.csv.fileId);
+    const prefix = p.options.migrationTagPrefix;
+    if (prefix === "csv" || (previous && prefix === tagPrefixFor(previous.name))) {
+      p.options.migrationTagPrefix = tagPrefixFor(fileName);
+    }
+  };
   const choose = (fileId: string) => {
     const file = files.data?.find((f) => f.id === fileId);
     update((p) => {
-      p.csv.fileId = fileId;
-      // Ids like 1, 2, 3 repeat between files: a tag prefix per file keeps two imports into one project apart.
-      if (file && p.options.migrationTagPrefix === "csv") {
-        p.options.migrationTagPrefix = tagPrefixFor(file.name);
+      if (file) {
+        followFile(p, file.name);
       }
+      p.csv.fileId = fileId;
     });
     forgetDiscovery();
     // "Used by" is computed from saved profiles.
@@ -92,10 +100,8 @@ export function FileStep() {
       queryClient.setQueryData(["files"], (list: typeof files.data) => [{ ...file, usedBy: [] }, ...(list ?? [])]);
       void queryClient.invalidateQueries({ queryKey: ["files"] });
       update((p) => {
+        followFile(p, file.name);
         p.csv.fileId = file.id;
-        if (p.options.migrationTagPrefix === "csv") {
-          p.options.migrationTagPrefix = tagPrefixFor(file.name);
-        }
       });
       forgetDiscovery();
       notifications.show({ color: "green", message: `Uploaded "${file.name}".` });
