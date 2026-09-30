@@ -24,7 +24,7 @@ Profiles and run logs are stored in the `migration-data` Docker volume. Use **Ex
 
 ## The steps
 
-1. **Connections.** TestRail and Allure TestOps credentials with a *Test connection* button. An optional TestRail session cookie is only needed when inline images fail to download on some TestRail versions.
+1. **Connections.** TestRail and Allure TestOps credentials with a *Test connection* button. An optional TestRail session cookie is only needed when inline images fail to download on some TestRail versions. The TestRail API rate limit is set here too, see below.
 2. **Projects.** The TestRail project, optionally some suites or a list of case ids for a trial run, and the target Allure TestOps project.
 3. **Suites & sections.** The tool scans the section tree of the selected suites and shows how deep it is and which sections sit on each level. Each level gets its own Allure TestOps custom field (for example *Epic*, *Feature*, *Story*) instead of generic `Section1..N` fields. Levels deeper than the ones you map are either joined into the last mapped level (`Login / Errors`) or dropped. The suite name can go to its own field. The tool can create an Allure TestOps tree built from these fields.
 4. **Fields.** Every TestRail field (system and custom) with its type, how often it is filled and example values from sampled cases. Choose a target for each: custom field, tags, layer, status, owner, links, issues, description, precondition, expected result, comment or scenario. Fields with a list of values (dropdowns, priorities, types, users, milestones, checkboxes) show all values with counts; each can be renamed, pointed at an existing Allure TestOps value or skipped. TestRail users are matched to Allure TestOps accounts by email automatically.
@@ -51,6 +51,12 @@ Profiles and run logs are stored in the `migration-data` Docker volume. Use **Ex
 | Links to other TestRail cases | Links to the migrated Allure TestOps cases |
 
 Every migrated case gets the tag `testrail:<case id>` (the prefix is configurable). Reruns find cases by this tag, so the tool can continue or refresh a migration, including one made with the previous command line migration tool when the same prefix and shared step names are used.
+
+## TestRail API rate limit
+
+TestRail Cloud allows 180 API requests per minute per instance on Professional and 300 on Enterprise; TestRail Server has no limit ([TestRail docs](https://support.testrail.com/hc/en-us/articles/7077083596436-Introduction-to-the-TestRail-API)). The tool paces its requests to stay within the limit chosen on the Connections step: Professional (default), Enterprise, a custom number, or off for TestRail Server. The limit covers everything the tool sends to that TestRail instance at once (discovery, previews and runs of all profiles). Because the limit is shared with every other API user of the instance, such as CI jobs posting results, a custom value below the plan limit leaves them room. If TestRail still answers 429, the tool waits for the time given in `Retry-After` before sending anything else.
+
+A migration needs roughly one TestRail request per case, plus one per attachment and shared step; case lists are read 250 at a time. The dry run estimates the number of requests and the minimum duration, and every run reports how many requests it sent and how long it waited for the limit.
 
 ## Security
 

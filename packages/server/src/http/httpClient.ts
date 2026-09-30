@@ -1,4 +1,5 @@
 import { Agent, fetch, FormData, type Dispatcher, type RequestInit, type Response } from "undici";
+import type { RateLimiter } from "./rateLimiter.js";
 
 export class HttpError extends Error {
   constructor(
@@ -21,6 +22,8 @@ export interface HttpClientOptions {
   /** Retries for 429 and 5xx responses and network errors. */
   retries?: number;
   timeoutMs?: number;
+  /** Every attempt, including retries, waits for a slot here. */
+  rateLimiter?: RateLimiter;
   /** Test seam. */
   sleep?: (ms: number) => Promise<void>;
 }
@@ -41,6 +44,7 @@ export function withTrailingSlash(url: string): string {
  */
 export class HttpClient {
   readonly baseUrl: string;
+  readonly rateLimiter: RateLimiter | undefined;
   private readonly headers: Record<string, string>;
   private readonly dispatcher: Dispatcher | undefined;
   private readonly retries: number;
@@ -54,6 +58,7 @@ export class HttpClient {
     this.retries = options.retries ?? 5;
     this.timeoutMs = options.timeoutMs ?? 120_000;
     this.sleep = options.sleep ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms)));
+    this.rateLimiter = options.rateLimiter;
   }
 
   /** `path` is appended to the base URL as is, so TestRail style `index.php?/api/v2/...` paths work. */
@@ -124,7 +129,12 @@ export class HttpClient {
       };
       let response: Response;
       try {
-        response = await fetch(url, request);
+        const received = await this.rateLimiter?.acquire();
+        try {
+          response = await fetch(url, request);
+        } finally {
+          received?.();
+        }
       } catch (error) {
         if (attempt < this.retries) {
           await this.sleep(backoff(attempt));
@@ -138,7 +148,12 @@ export class HttpClient {
       }
       if (RETRY_STATUSES.has(response.status) && attempt < this.retries) {
         await response.body?.cancel();
-        await this.sleep(retryAfter(response) ?? backoff(attempt));
+        const delay = retryAfter(response) ?? backoff(attempt);
+        if (response.status === 429) {
+          // The server counts requests for everyone using this limiter: hold them all.
+          this.rateLimiter?.pauseFor(delay);
+        }
+        await this.sleep(delay);
         attempt += 1;
         continue;
       }

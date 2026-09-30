@@ -1,8 +1,8 @@
-import { Alert, Anchor, Button, Card, Collapse, Group, PasswordInput, SimpleGrid, Stack, Switch, Text, TextInput, Title } from "@mantine/core";
+import { Alert, Anchor, Button, Card, Collapse, Group, NumberInput, PasswordInput, Select, SimpleGrid, Stack, Switch, Text, TextInput, Title } from "@mantine/core";
 import { IconAlertCircle, IconCircleCheck } from "@tabler/icons-react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
-import { SECRET_MASK } from "@atm/shared";
+import { SECRET_MASK, TESTRAIL_RATE_LIMITS, type TestRailConnection } from "@atm/shared";
 import { api, errorText, type CheckResult } from "../../api/client";
 import { useProfile } from "../../components/ProfileContext";
 
@@ -18,6 +18,25 @@ function CheckAlert({ result, error }: { result?: CheckResult; error: unknown })
       {result.message}
     </Alert>
   );
+}
+
+const CLOUD_HOST = /\.testrail\.(io|net|com)$/i;
+
+function rateLimitHint(endpoint: string, mode: TestRailConnection["rateLimit"]): string {
+  let host = "";
+  try {
+    host = new URL(endpoint).hostname;
+  } catch {
+    // Not a URL yet.
+  }
+  const base = "TestRail Cloud limits API requests per instance, shared with everyone using the API. Requests are paced to stay below it.";
+  if (host && !CLOUD_HOST.test(host) && mode !== "off") {
+    return `${base} This looks like a TestRail Server, which has no limit: you can turn it off.`;
+  }
+  if (host && CLOUD_HOST.test(host) && mode === "off") {
+    return "This looks like TestRail Cloud: without a limit TestRail may reject requests and the migration slows down on retries.";
+  }
+  return base;
 }
 
 const secretPlaceholder = (value: string) => (value === SECRET_MASK ? "Stored. Type to replace it" : undefined);
@@ -85,6 +104,30 @@ export function ConnectionsStep() {
                 update((p) => void (p.testrail.connection.apiKey = value));
               }}
             />
+            <Select
+              label="API rate limit"
+              description={rateLimitHint(tr.endpoint, tr.rateLimit)}
+              allowDeselect={false}
+              data={[
+                { value: "professional", label: `TestRail Cloud Professional: ${TESTRAIL_RATE_LIMITS.professional} requests per minute` },
+                { value: "enterprise", label: `TestRail Cloud Enterprise: ${TESTRAIL_RATE_LIMITS.enterprise} requests per minute` },
+                { value: "custom", label: "Custom" },
+                { value: "off", label: "Off (TestRail Server has no limit)" },
+              ]}
+              value={tr.rateLimit}
+              onChange={(value) => value && update((p) => void (p.testrail.connection.rateLimit = value as TestRailConnection["rateLimit"]))}
+            />
+            {tr.rateLimit === "custom" && (
+              <NumberInput
+                label="Requests per minute"
+                description="Useful to leave room for other API users of the same TestRail, such as CI jobs posting results."
+                min={1}
+                max={100000}
+                w={260}
+                value={tr.requestsPerMinute}
+                onChange={(value) => update((p) => void (p.testrail.connection.requestsPerMinute = Math.max(1, Math.floor(Number(value) || 1))))}
+              />
+            )}
             <Anchor size="sm" component="button" type="button" onClick={() => setAdvanced((v) => !v)} ta="left">
               {advanced ? "Hide" : "Show"} advanced settings
             </Anchor>

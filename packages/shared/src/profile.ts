@@ -22,8 +22,29 @@ export const TestRailConnectionSchema = z.object({
    */
   sessionCookie: z.string().default(""),
   insecureTls: z.boolean().default(false),
+  /**
+   * TestRail Cloud limits API requests per instance: 180 per minute on Professional, 300 on
+   * Enterprise. TestRail Server has no limit.
+   */
+  rateLimit: z.enum(["professional", "enterprise", "custom", "off"]).default("professional"),
+  /** Used when `rateLimit` is `custom`. */
+  requestsPerMinute: z.number().int().min(1).max(100_000).default(180),
 });
 export type TestRailConnection = z.infer<typeof TestRailConnectionSchema>;
+
+export const TESTRAIL_RATE_LIMITS = { professional: 180, enterprise: 300 } as const;
+
+/** Requests per minute the tool allows itself against TestRail, or null for no limit. */
+export function testRailRequestsPerMinute(connection: Pick<TestRailConnection, "rateLimit" | "requestsPerMinute">): number | null {
+  switch (connection.rateLimit) {
+    case "off":
+      return null;
+    case "custom":
+      return connection.requestsPerMinute;
+    default:
+      return TESTRAIL_RATE_LIMITS[connection.rateLimit];
+  }
+}
 
 export const TestOpsConnectionSchema = z.object({
   endpoint: z.string().default(""),

@@ -1,5 +1,6 @@
-import type { TestRailConnection } from "@atm/shared";
+import { testRailRequestsPerMinute, type TestRailConnection } from "@atm/shared";
 import { HttpClient, HttpError, type Query } from "../http/httpClient.js";
+import { sharedRateLimiter, type RateLimiter } from "../http/rateLimiter.js";
 import type {
   TrAttachment,
   TrCase,
@@ -29,11 +30,13 @@ export class TestRailClient {
     private readonly connection: TestRailConnection,
     http?: HttpClient,
   ) {
+    const perMinute = testRailRequestsPerMinute(connection);
     this.http =
       http ??
       new HttpClient({
         baseUrl: connection.endpoint,
         insecureTls: connection.insecureTls,
+        rateLimiter: perMinute === null ? undefined : sharedRateLimiter(connection.endpoint, perMinute),
         headers: {
           Authorization: `Basic ${Buffer.from(`${connection.username}:${connection.apiKey}`).toString("base64")}`,
         },
@@ -42,6 +45,11 @@ export class TestRailClient {
 
   get endpoint(): string {
     return this.http.baseUrl;
+  }
+
+  /** Null when rate limiting is off. */
+  get rateLimiter(): RateLimiter | null {
+    return this.http.rateLimiter ?? null;
   }
 
   caseUrl(caseId: number): string {
