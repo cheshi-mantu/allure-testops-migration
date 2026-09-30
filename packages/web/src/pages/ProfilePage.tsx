@@ -23,6 +23,7 @@ import {
   IconDots,
   IconDownload,
   IconEye,
+  IconFileSpreadsheet,
   IconHierarchy2,
   IconListDetails,
   IconPlayerPlay,
@@ -39,6 +40,7 @@ import { api, errorText } from "../api/client";
 import { ProfileProvider, useProfile, type SaveState } from "../components/ProfileContext";
 import { ConnectionsStep } from "./steps/ConnectionsStep";
 import { FieldsStep } from "./steps/FieldsStep";
+import { FileStep } from "./steps/FileStep";
 import { OptionsStep } from "./steps/OptionsStep";
 import { PreviewStep } from "./steps/PreviewStep";
 import { RunStep } from "./steps/RunStep";
@@ -51,12 +53,14 @@ interface StepDef {
   description: string;
   icon: ReactNode;
   done: (profile: Profile) => boolean;
+  /** Why the next step cannot be opened yet, if it cannot. */
+  blocked?: (profile: Profile) => string | null;
   render: () => ReactNode;
 }
 
 const hasSecret = (value: string) => value === SECRET_MASK || value.trim() !== "";
 
-const STEPS: StepDef[] = [
+const TESTRAIL_STEPS: StepDef[] = [
   {
     key: "connections",
     label: "Connections",
@@ -89,12 +93,59 @@ const STEPS: StepDef[] = [
     done: (p) => p.fields.length > 0,
     render: () => <FieldsStep />,
   },
+];
+
+const CSV_STEPS: StepDef[] = [
+  {
+    key: "connections",
+    label: "Connection",
+    description: "Allure TestOps access",
+    icon: <IconPlugConnected size={16} />,
+    done: (p) => Boolean(p.testops.connection.endpoint && hasSecret(p.testops.connection.apiToken)),
+    render: () => <ConnectionsStep />,
+  },
+  {
+    key: "file",
+    label: "CSV file",
+    description: "Upload or reuse, reading settings",
+    icon: <IconFileSpreadsheet size={16} />,
+    done: (p) => Boolean(p.csv.fileId),
+    render: () => <FileStep />,
+  },
+  {
+    key: "scope",
+    label: "Project",
+    description: "Where to migrate",
+    icon: <IconTarget size={16} />,
+    done: (p) => Boolean(p.testops.scope.projectId),
+    render: () => <ScopeStep />,
+  },
+  {
+    key: "structure",
+    label: "Sections",
+    description: "Path column levels → custom fields",
+    icon: <IconHierarchy2 size={16} />,
+    done: (p) => p.csv.withoutPath || Boolean(p.csv.pathColumn && p.structure.levels.some(Boolean)),
+    render: () => <StructureStep />,
+  },
+  {
+    key: "fields",
+    label: "Columns",
+    description: "CSV columns → Allure TestOps",
+    icon: <IconListDetails size={16} />,
+    done: (p) => p.fields.some((m) => m.target.kind === "name"),
+    render: () => <FieldsStep />,
+  },
+];
+
+const COMMON_STEPS: StepDef[] = [
   {
     key: "options",
     label: "Options",
     description: "Tags, text, attachments",
     icon: <IconSettings size={16} />,
-    done: () => true,
+    done: (p) => p.options.migrationTagPrefix.trim() !== "",
+    blocked: (p) => (p.options.migrationTagPrefix.trim() === "" ? "Enter the migration tag prefix first." : null),
     render: () => <OptionsStep />,
   },
   {
@@ -114,6 +165,10 @@ const STEPS: StepDef[] = [
     render: () => <RunStep />,
   },
 ];
+
+function stepsFor(profile: Profile): StepDef[] {
+  return [...(profile.source === "csv" ? CSV_STEPS : TESTRAIL_STEPS), ...COMMON_STEPS];
+}
 
 export function ProfilePage() {
   const { id = "" } = useParams();
@@ -161,8 +216,10 @@ function ProfileEditor() {
   const [exporting, setExporting] = useState(false);
   const [includeSecrets, setIncludeSecrets] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const STEPS = stepsFor(profile);
   const current = STEPS.find((s) => s.key === step) ?? STEPS[0]!;
   const index = STEPS.indexOf(current);
+  const blockedReason = current.blocked?.(profile) ?? null;
 
   const duplicate = useMutation({
     mutationFn: async () => {
@@ -265,7 +322,16 @@ function ProfileEditor() {
             <span />
           )}
           {index < STEPS.length - 1 && (
-            <Button onClick={() => navigate(`/profiles/${profile.id}/${STEPS[index + 1]!.key}`)}>{STEPS[index + 1]!.label} →</Button>
+            <Group gap="sm">
+              {blockedReason && (
+                <Text size="sm" c="red">
+                  {blockedReason}
+                </Text>
+              )}
+              <Button disabled={Boolean(blockedReason)} onClick={() => navigate(`/profiles/${profile.id}/${STEPS[index + 1]!.key}`)}>
+                {STEPS[index + 1]!.label} →
+              </Button>
+            </Group>
           )}
         </Group>
       </Grid.Col>

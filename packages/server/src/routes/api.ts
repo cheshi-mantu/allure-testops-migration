@@ -7,7 +7,10 @@ import {
   PROFILE_FORMAT_VERSION,
   ProfileSchema,
   restoreSecrets,
+  SOURCES,
+  type CsvFilePreview,
   type PlannedCase,
+  type StoredFileInfo,
   type Profile,
   type ProfileListItem,
 } from "@atm/shared";
@@ -19,9 +22,17 @@ import { TestOpsClient } from "../testops/client.js";
 import { TestRailClient } from "../testrail/client.js";
 import { discoverTestOps } from "../testops/discovery.js";
 import { discoverTestRail, loadTestRailContext } from "../testrail/discovery.js";
+import { groupCases } from "../csv/cases.js";
+import { analyseColumns, discoverCsv, loadCsv } from "../csv/discovery.js";
+import { CaseSkipped } from "../engine/errors.js";
+import { explain, KnownProblem, OperationFailed, serviceOf } from "../engine/problems.js";
+import { HttpError } from "../http/httpClient.js";
+import { prepareSource } from "../engine/sources.js";
+import type { FileStore } from "../storage/fileStore.js";
 import { checkTestOps, checkTestRail } from "./checks.js";
 
 export interface ApiDeps {
+  files: FileStore;
   profiles: ProfileStore;
   runs: RunStore;
   runner: RunManager;
@@ -29,23 +40,48 @@ export interface ApiDeps {
 
 class NotFound extends Error {}
 
+const MAX_UPLOAD_BYTES = 200 * 1024 * 1024;
+
 function newId(): string {
   return randomUUID().replace(/-/g, "").slice(0, 12);
 }
 
 export async function registerApi(app: FastifyInstance, deps: ApiDeps): Promise<void> {
-  const { profiles, runs, runner } = deps;
+  const { profiles, runs, runner, files } = deps;
 
-  app.setErrorHandler((error, _request, reply) => {
+  app.addContentTypeParser(["application/octet-stream", "text/csv", "application/vnd.ms-excel"], { parseAs: "buffer", bodyLimit: MAX_UPLOAD_BYTES }, (_request, body, done) =>
+    done(null, body),
+  );
+
+  app.setErrorHandler(async (error, request, reply) => {
     if (error instanceof NotFound) {
       return reply.status(404).send({ message: error.message });
     }
     if (error instanceof z.ZodError) {
       return reply.status(400).send({ message: "Invalid data", issues: error.issues });
     }
+    if (error instanceof KnownProblem) {
+      const { title, hint, fix } = error.explanation;
+      return reply.status(422).send({ message: title, hint, fix });
+    }
+    if (error instanceof CaseSkipped) {
+      return reply.status(422).send({ message: error.message, hint: error.note.hint, fix: error.note.fix });
+    }
     const status = (error as { statusCode?: number }).statusCode;
     if (status && status < 500) {
       return reply.status(status).send({ message: (error as Error).message });
+    }
+    if (error instanceof HttpError || error instanceof OperationFailed) {
+      // A remote system refused: say which one, why, and where to fix it.
+      const params = request.params as { id?: string } | undefined;
+      const profile = params?.id ? await profiles.get(params.id).catch(() => null) : null;
+      if (profile) {
+        const explanation = explain(error, error instanceof OperationFailed ? error.operation : "read the project", {
+          profile,
+          service: serviceOf(error, profile),
+        });
+        return reply.status(502).send({ message: explanation.title, hint: explanation.hint, fix: explanation.fix, detail: explanation.detail });
+      }
     }
     app.log.error(error);
     // Errors from remote systems are safe to show: they never contain credentials.
@@ -64,10 +100,13 @@ export async function registerApi(app: FastifyInstance, deps: ApiDeps): Promise<
 
   app.get("/api/profiles", async (): Promise<ProfileListItem[]> => {
     const all = await profiles.list();
+    const fileNames = new Map((await files.list()).map((f) => [f.id, f.name]));
     return Promise.all(
       all.map(async (profile) => ({
         id: profile.id,
         name: profile.name,
+        source: profile.source,
+        fileName: profile.csv.fileId ? (fileNames.get(profile.csv.fileId) ?? null) : null,
         updatedAt: profile.updatedAt,
         testrailEndpoint: profile.testrail.connection.endpoint,
         testopsEndpoint: profile.testops.connection.endpoint,
@@ -77,8 +116,8 @@ export async function registerApi(app: FastifyInstance, deps: ApiDeps): Promise<
   });
 
   app.post("/api/profiles", async (request) => {
-    const { name } = z.object({ name: z.string().trim().min(1) }).parse(request.body);
-    return maskSecrets(await profiles.save(newProfile(newId(), name)));
+    const { name, source } = z.object({ name: z.string().trim().min(1), source: z.enum(SOURCES).default("testrail") }).parse(request.body);
+    return maskSecrets(await profiles.save(newProfile(newId(), name, new Date(), source)));
   });
 
   app.get<{ Params: { id: string } }>("/api/profiles/:id", async (request) => maskSecrets(await load(request.params.id)));
@@ -153,7 +192,58 @@ export async function registerApi(app: FastifyInstance, deps: ApiDeps): Promise<
     return { suiteMode: project.suite_mode, suites: suites.map((s) => ({ id: s.id, name: s.name })) };
   });
 
-  app.post<{ Params: { id: string } }>("/api/profiles/:id/testrail/discover", async (request) => discoverTestRail(await load(request.params.id)));
+  const discoverSource = async (profile: Profile) => (profile.source === "csv" ? discoverCsv(profile, files) : discoverTestRail(profile));
+  app.post<{ Params: { id: string } }>("/api/profiles/:id/source/discover", async (request) => discoverSource(await load(request.params.id)));
+  app.post<{ Params: { id: string } }>("/api/profiles/:id/testrail/discover", async (request) => discoverSource(await load(request.params.id)));
+
+  // ------------------------------------------------------------ file library
+
+  const filesWithUsage = async (): Promise<StoredFileInfo[]> => {
+    const [list, all] = await Promise.all([files.list(), profiles.list()]);
+    return list.map((file) => ({
+      ...file,
+      usedBy: all.filter((p) => p.source === "csv" && p.csv.fileId === file.id).map((p) => ({ id: p.id, name: p.name })),
+    }));
+  };
+
+  app.get("/api/files", async () => filesWithUsage());
+
+  app.post<{ Querystring: { name?: string } }>(
+    "/api/files",
+    { bodyLimit: MAX_UPLOAD_BYTES },
+    async (request) => {
+      const data = request.body;
+      if (!Buffer.isBuffer(data) || data.length === 0) {
+        throw Object.assign(new Error("The file is empty."), { statusCode: 400 });
+      }
+      return files.save(request.query.name ?? "file.csv", data);
+    },
+  );
+
+  app.delete<{ Params: { fileId: string } }>("/api/files/:fileId", async (request, reply) => {
+    const usedBy = (await filesWithUsage()).find((f) => f.id === request.params.fileId)?.usedBy ?? [];
+    if (usedBy.length > 0) {
+      return reply.status(409).send({ message: `The file is used by ${usedBy.map((p) => `"${p.name}"`).join(", ")}.` });
+    }
+    await files.delete(request.params.fileId);
+    return reply.status(204).send();
+  });
+
+  app.get<{ Params: { id: string } }>("/api/profiles/:id/csv/preview", async (request): Promise<CsvFilePreview> => {
+    const profile = await load(request.params.id);
+    const { table } = await loadCsv(profile, files);
+    const grouped = groupCases(table, analyseColumns(profile, table).effective);
+    return {
+      delimiter: table.delimiter,
+      encoding: table.encoding,
+      columns: table.columns,
+      rows: table.rows.slice(0, 20).map((row) => table.columns.map((c) => row[c] ?? "")),
+      rowCount: table.rows.length,
+      caseCount: grouped.cases.length,
+      multiRow: grouped.multiRow,
+      warnings: table.warnings,
+    };
+  });
   app.post<{ Params: { id: string } }>("/api/profiles/:id/testops/discover", async (request) => discoverTestOps(await load(request.params.id)));
 
   app.get<{ Params: { id: string }; Querystring: { name?: string } }>("/api/profiles/:id/testops/cf-values", async (request) => {
@@ -167,12 +257,33 @@ export async function registerApi(app: FastifyInstance, deps: ApiDeps): Promise<
     if (!field) {
       return [];
     }
-    return (await client.customFieldValues(field.id)).map((value) => value.name).sort((a, b) => a.localeCompare(b));
+    // The first values are enough to pick from; the input also accepts any typed value.
+    const values = await client.suggestCustomFieldValues(field.id, "", 500, profile.testops.scope.projectId ?? undefined);
+    return values.map((value) => value.name).sort((a, b) => a.localeCompare(b));
   });
 
-  app.post<{ Params: { id: string } }>("/api/profiles/:id/preview", async (request): Promise<PlannedCase & { linkedCaseIds: number[] }> => {
-    const { caseId } = z.object({ caseId: z.coerce.number().int().positive() }).parse(request.body);
+  app.post<{ Params: { id: string } }>("/api/profiles/:id/preview", async (request): Promise<PlannedCase & { linkedCaseIds: string[] }> => {
+    const { caseId: rawId } = z.object({ caseId: z.coerce.string().trim().min(1) }).parse(request.body);
     const profile = await load(request.params.id);
+    if (profile.source === "csv") {
+      const source = await prepareSource(profile, { files }, () => undefined);
+      const cases = await source.readCases(() => undefined, () => false);
+      const wanted = rawId.toLowerCase();
+      const testCase = cases.find((c) => c.key.toLowerCase() === wanted) ?? cases.find((c) => c.title.toLowerCase() === wanted);
+      if (!testCase) {
+        throw Object.assign(new Error(`No case "${rawId}" in the file.`), { statusCode: 404 });
+      }
+      try {
+        const { planned, linkedCaseIds } = source.transform(testCase);
+        return { ...planned, linkedCaseIds };
+      } catch (error) {
+        throw error instanceof CaseSkipped ? Object.assign(error, { statusCode: 422 }) : error;
+      }
+    }
+    const caseId = Number(rawId.replace(/^C/i, ""));
+    if (!Number.isInteger(caseId) || caseId <= 0) {
+      throw Object.assign(new Error(`"${rawId}" is not a TestRail case id.`), { statusCode: 400 });
+    }
     const context = await loadTestRailContext(profile);
     const testCase = await context.client.getCase(caseId);
     const { planned, linkedCaseIds } = transformCase(testCase, {
@@ -184,7 +295,12 @@ export async function registerApi(app: FastifyInstance, deps: ApiDeps): Promise<
       sections: context.sections,
     });
     if (!context.sections.has(testCase.suite_id)) {
-      planned.notes.push("This case belongs to a suite that is not selected for migration.");
+      planned.notes.push({
+        code: "suite-not-selected",
+        text: "This case belongs to a suite that is not selected for migration.",
+        hint: "Add its suite on the Projects step if the case should be migrated.",
+        fix: { step: "scope" },
+      });
     }
     for (const step of planned.scenario) {
       if (step.type === "shared") {
@@ -214,11 +330,55 @@ export async function registerApi(app: FastifyInstance, deps: ApiDeps): Promise<
     }
   });
 
+  app.delete<{ Params: { id: string } }>("/api/profiles/:id/runs", async (request, reply) => {
+    if (runner.activeRun(request.params.id)) {
+      return reply.status(409).send({ message: "Stop the running migration before clearing the history." });
+    }
+    await runs.deleteProfileRuns(request.params.id);
+    return reply.status(204).send();
+  });
+
   app.post<{ Params: { id: string } }>("/api/profiles/:id/runs/cancel", async (request) => ({ cancelled: runner.cancel(request.params.id) }));
 
   app.get<{ Params: { id: string; runId: string }; Querystring: { after?: string } }>("/api/profiles/:id/runs/:runId/log", async (request) =>
     runs.log(request.params.id, request.params.runId, Number(request.query.after ?? 0)),
   );
+
+  /** The whole run as text: summary, problems with their fixes, then every log line. For support tickets. */
+  app.get<{ Params: { id: string; runId: string } }>("/api/profiles/:id/runs/:runId/log.txt", async (request, reply) => {
+    const { id, runId } = request.params;
+    const profile = await load(id);
+    const summary = runner.isActive(id, runId) ? runner.activeRun(id)!.summary : await runs.get(id, runId);
+    if (!summary) {
+      throw new NotFound("Run not found");
+    }
+    const lines: string[] = [
+      `Allure TestOps migration: ${summary.dryRun ? "dry run" : "migration"} ${summary.id}`,
+      `Profile: ${profile.name} (source: ${profile.source})`,
+      `Status: ${summary.status}, started ${summary.startedAt}${summary.finishedAt ? `, finished ${summary.finishedAt}` : ""}`,
+      `Counters: ${JSON.stringify(summary.counters)}`,
+    ];
+    if (summary.error) {
+      lines.push("", `Error: ${summary.error}`, `How to fix: ${summary.errorHint ?? "-"}`);
+    }
+    for (const problem of summary.problems ?? []) {
+      lines.push(
+        "",
+        `[${problem.level}] ${problem.title} (${problem.count} time(s))`,
+        `  How to fix: ${problem.hint}`,
+        ...(problem.detail ? [`  Server message: ${problem.detail}`] : []),
+        ...(problem.cases.length ? [`  Affected: ${problem.cases.join(", ")}`] : []),
+      );
+    }
+    lines.push("", "Log:");
+    for (const entry of await runs.log(id, runId, 0, Number.MAX_SAFE_INTEGER)) {
+      lines.push(`${entry.time} ${entry.level.toUpperCase().padEnd(5)} ${entry.caseId ? `[${entry.caseId}] ` : ""}${entry.message}`);
+    }
+    return reply
+      .header("Content-Type", "text/plain; charset=utf-8")
+      .header("Content-Disposition", `attachment; filename="migration-${summary.id}.log"`)
+      .send(`${lines.join("\n")}\n`);
+  });
 
   app.get<{ Params: { id: string; runId: string } }>("/api/profiles/:id/runs/:runId/events", async (request, reply) => {
     const { id, runId } = request.params;

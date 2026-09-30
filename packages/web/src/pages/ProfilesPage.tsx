@@ -8,6 +8,7 @@ import {
   Group,
   Loader,
   Modal,
+  Radio,
   SimpleGrid,
   Stack,
   Text,
@@ -19,6 +20,7 @@ import { IconFileImport, IconPlus } from "@tabler/icons-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
+import type { SourceType } from "@atm/shared";
 import { api, errorText } from "../api/client";
 import { RunStatusBadge } from "../components/RunStatusBadge";
 
@@ -27,10 +29,12 @@ export function ProfilesPage() {
   const queryClient = useQueryClient();
   const profiles = useQuery({ queryKey: ["profiles"], queryFn: api.profiles });
   const [creating, setCreating] = useState(false);
+  const [source, setSource] = useState<SourceType>("testrail");
   const [name, setName] = useState("TestRail migration");
+  const [nameTouched, setNameTouched] = useState(false);
 
   const create = useMutation({
-    mutationFn: () => api.createProfile(name),
+    mutationFn: () => api.createProfile(name, source),
     onSuccess: (profile) => {
       void queryClient.invalidateQueries({ queryKey: ["profiles"] });
       navigate(`/profiles/${profile.id}/connections`);
@@ -76,8 +80,8 @@ export function ProfilesPage() {
           <Stack align="center" gap="xs">
             <Title order={4}>No profiles yet</Title>
             <Text c="dimmed" ta="center" maw={520}>
-              Create a profile to connect TestRail and Allure TestOps, map suites, sections and fields, preview the result and run the
-              migration. Or import a profile exported on another machine.
+              Create a profile to migrate from TestRail or a CSV file: map structure and fields using the real data, preview the result
+              and run the migration. Or import a profile exported on another machine.
             </Text>
             <Button mt="sm" leftSection={<IconPlus size={16} />} onClick={() => setCreating(true)}>
               New profile
@@ -95,7 +99,7 @@ export function ProfilesPage() {
               {profile.lastRun ? <RunStatusBadge run={profile.lastRun} /> : <Badge variant="light" color="gray">Not run</Badge>}
             </Group>
             <Text size="sm" c="dimmed" truncate>
-              From: {profile.testrailEndpoint || "not set"}
+              From: {profile.source === "csv" ? `CSV ${profile.fileName ? `"${profile.fileName}"` : "file not chosen"}` : profile.testrailEndpoint || "not set"}
             </Text>
             <Text size="sm" c="dimmed" truncate>
               To: {profile.testopsEndpoint || "not set"}
@@ -114,7 +118,37 @@ export function ProfilesPage() {
             create.mutate();
           }}
         >
-          <TextInput label="Name" value={name} onChange={(e) => setName(e.currentTarget.value)} data-autofocus required />
+          <Stack>
+            <Radio.Group
+              label="Migrate from"
+              value={source}
+              onChange={(value) => {
+                const next = value as SourceType;
+                setSource(next);
+                if (!nameTouched) {
+                  setName(next === "csv" ? "CSV import" : "TestRail migration");
+                }
+              }}
+            >
+              <Stack gap="xs" mt="xs">
+                <Radio value="testrail" label="TestRail" description="Reads projects, suites, sections, fields, shared steps and attachments through the TestRail API." />
+                <Radio
+                  value="csv"
+                  label="CSV file"
+                  description="Any spreadsheet export: one or several rows per test case, steps in one cell or one per row."
+                />
+              </Stack>
+            </Radio.Group>
+            <TextInput
+              label="Name"
+              value={name}
+              onChange={(e) => {
+                setName(e.currentTarget.value);
+                setNameTouched(true);
+              }}
+              required
+            />
+          </Stack>
           <Group justify="flex-end" mt="md">
             <Button variant="default" onClick={() => setCreating(false)}>
               Cancel

@@ -1,18 +1,21 @@
 import type { TestOpsClient, ToNamed } from "../testops/client.js";
+import { OperationFailed } from "./problems.js";
 
 type Logger = (level: "info" | "warn", message: string) => void;
 
 /**
  * Looks up (and when allowed creates) Allure TestOps objects by name, with caching.
  * Concurrent lookups for the same name share one request, so parallel cases never create duplicates.
+ * Missing objects are returned as null or thrown as OperationFailed; the caller reports them per case.
  */
 export class TargetResolver {
   private readonly customFields = new Map<string, Promise<ToNamed>>();
-  private readonly layers = new Map<string, Promise<ToNamed | null>>();
+  private readonly layers = new Map<string, Promise<ToNamed>>();
   private statuses: Promise<ToNamed[]> | null = null;
   private layerList: Promise<ToNamed[]> | null = null;
   private projectFields: Promise<ToNamed[]> | null = null;
-  private readonly warned = new Set<string>();
+  private accounts: Promise<Set<string> | null> | null = null;
+  private roleList: Promise<ToNamed[]> | null = null;
 
   constructor(
     private readonly client: TestOpsClient,
@@ -37,16 +40,21 @@ export class TargetResolver {
     if (inProject) {
       return inProject;
     }
-    const global = (await this.client.suggestCustomFields(name)).find((f) => f.name === name);
-    const field = global ?? (await this.client.createCustomField(name));
-    if (!global) {
-      this.log("info", `Created custom field "${name}".`);
+    try {
+      const global = (await this.client.suggestCustomFields(name)).find((f) => f.name === name);
+      const field = global ?? (await this.client.createCustomField(name));
+      if (!global) {
+        this.log("info", `Created custom field "${name}".`);
+      }
+      await this.client.addCustomFieldsToProject(this.projectId, [field.id]);
+      return field;
+    } catch (error) {
+      throw new OperationFailed("create a custom field", error);
     }
-    await this.client.addCustomFieldsToProject(this.projectId, [field.id]);
-    return field;
   }
 
-  layer(name: string): Promise<ToNamed | null> {
+  /** Existing layer, or a new one; throws OperationFailed when it cannot be created. */
+  layer(name: string): Promise<ToNamed> {
     const key = name.trim();
     let pending = this.layers.get(key.toLowerCase());
     if (!pending) {
@@ -56,7 +64,7 @@ export class TargetResolver {
     return pending;
   }
 
-  private async findOrCreateLayer(name: string): Promise<ToNamed | null> {
+  private async findOrCreateLayer(name: string): Promise<ToNamed> {
     this.layerList ??= this.client.layers();
     const existing = (await this.layerList).find((layer) => layer.name.toLowerCase() === name.toLowerCase());
     if (existing) {
@@ -67,17 +75,13 @@ export class TargetResolver {
       this.log("info", `Created test layer "${name}".`);
       return created;
     } catch (error) {
-      this.warnOnce(`layer:${name}`, `Cannot create test layer "${name}": ${error instanceof Error ? error.message : String(error)}`);
-      return null;
+      throw new OperationFailed("create a test layer", error);
     }
   }
 
-  private accounts: Promise<Set<string> | null> | null = null;
-  private readonly missingOwners = new Map<string, number>();
-
   /**
-   * Checks that an owner exists before assigning it. When the token cannot list users the name is
-   * used as is and a failed assignment is reported by the writer.
+   * The user name if the user exists. When the token cannot list users the name is used as is and
+   * a failed assignment is reported by the writer.
    */
   async owner(username: string): Promise<string | null> {
     this.accounts ??= this.client
@@ -85,38 +89,18 @@ export class TargetResolver {
       .then((list) => new Set(list.map((a) => a.username)))
       .catch(() => null);
     const known = await this.accounts;
-    if (known === null || known.has(username)) {
-      return username;
-    }
-    this.ownerMissing(username);
-    return null;
+    return known === null || known.has(username) ? username : null;
   }
 
-  ownerMissing(username: string) {
-    this.missingOwners.set(username, (this.missingOwners.get(username) ?? 0) + 1);
-  }
-
-  /** One line per unknown owner instead of a warning per case. */
-  reportMissingOwners() {
-    for (const [username, count] of this.missingOwners) {
-      this.log("warn", `Owner "${username}" is not an Allure TestOps user; ${count} case(s) were left without an owner. Map the TestRail user to an existing user in the field mapping.`);
-    }
+  /** Roles are part of the instance configuration and are not created by the migration. */
+  async role(name: string): Promise<ToNamed | null> {
+    this.roleList ??= this.client.roles().catch(() => []);
+    return (await this.roleList).find((r) => r.name.toLowerCase() === name.trim().toLowerCase()) ?? null;
   }
 
   /** Statuses belong to workflows and are not created by the migration. */
   async status(name: string): Promise<ToNamed | null> {
     this.statuses ??= this.client.statuses();
-    const status = (await this.statuses).find((s) => s.name.toLowerCase() === name.trim().toLowerCase()) ?? null;
-    if (!status) {
-      this.warnOnce(`status:${name}`, `Status "${name}" does not exist in Allure TestOps; the default status is kept.`);
-    }
-    return status;
-  }
-
-  private warnOnce(key: string, message: string) {
-    if (!this.warned.has(key)) {
-      this.warned.add(key);
-      this.log("warn", message);
-    }
+    return (await this.statuses).find((s) => s.name.toLowerCase() === name.trim().toLowerCase()) ?? null;
   }
 }

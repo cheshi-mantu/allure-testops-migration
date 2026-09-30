@@ -1,10 +1,12 @@
 import {
   Alert,
+  Anchor,
   Badge,
   Card,
   Group,
   NumberInput,
   Radio,
+  Select,
   Stack,
   Switch,
   Table,
@@ -18,6 +20,108 @@ import { mapSectionPath } from "@atm/shared";
 import { CustomFieldInput, DiscoveryGate, RefreshButton } from "../../components/Discovery";
 import { useProfile } from "../../components/ProfileContext";
 
+const PATH_SEPARATORS = [
+  { value: "auto", label: "Detect automatically" },
+  { value: " > ", label: "A > B > C" },
+  { value: " / ", label: "A / B / C" },
+  { value: "/", label: "A/B/C" },
+  { value: "\\", label: "A\\B\\C" },
+  { value: " » ", label: "A » B » C" },
+  { value: "::", label: "A::B::C" },
+  { value: " | ", label: "A | B | C" },
+];
+
+/** CSV: which column holds the section path and how its levels are separated. */
+function PathColumnCard() {
+  const { profile, update, source, refreshDiscovery } = useProfile();
+  const info = source.data?.csv;
+  const columns = source.data?.fields.map((f) => f.systemName) ?? [];
+  const candidates = info?.pathCandidates ?? [];
+  const off = profile.csv.withoutPath;
+  const choose = (column: string | null) => {
+    update((p) => {
+      p.csv.pathColumn = column;
+      p.csv.withoutPath = false;
+      p.csv.pathSeparator = "auto";
+      // The path column feeds the levels; do not also migrate it as a plain field.
+      const mapping = p.fields.find((m) => m.source === column);
+      if (mapping && ["customField", "description"].includes(mapping.target.kind)) {
+        mapping.target = { kind: "ignore" };
+      }
+    });
+    void refreshDiscovery("source");
+  };
+  return (
+    <Card withBorder>
+      <Stack>
+        <Title order={4}>Section path column</Title>
+        <Text size="sm" c="dimmed">
+          A column like <i>Web &gt; Checkout &gt; Payment</i> or <i>/Web/Checkout/Payment</i> describes where a case sits. Its levels are
+          mapped below.
+        </Text>
+        <Switch
+          label="Do not use a section path"
+          description="Cases are not grouped by sections, and the tool stops suggesting a path column."
+          checked={off}
+          onChange={(event) => {
+            const checked = event.currentTarget.checked;
+            if (checked) {
+              update((p) => {
+                p.csv.pathColumn = null;
+                p.csv.pathSeparator = "auto";
+                p.csv.withoutPath = true;
+              });
+              void refreshDiscovery("source");
+            } else {
+              update((p) => void (p.csv.withoutPath = false));
+            }
+          }}
+        />
+        {!off && (
+        <Group align="flex-end">
+          <Select
+            label="Column"
+            w={320}
+            placeholder="No section path"
+            clearable
+            data={[
+              ...(candidates.length > 0 ? [{ group: "Look like paths", items: candidates.map((c) => c.column) }] : []),
+              { group: "Other columns", items: columns.filter((c) => !candidates.some((x) => x.column === c)) },
+            ]}
+            value={profile.csv.pathColumn}
+            onChange={choose}
+          />
+          {profile.csv.pathColumn && (
+            <Select
+              label="Levels separated by"
+              w={240}
+              allowDeselect={false}
+              data={PATH_SEPARATORS}
+              value={PATH_SEPARATORS.some((s) => s.value === profile.csv.pathSeparator) ? profile.csv.pathSeparator : "auto"}
+              description={profile.csv.pathSeparator === "auto" && info?.pathSeparator ? `Detected: "${info.pathSeparator.trim()}"` : undefined}
+              onChange={(value) => {
+                if (value) {
+                  update((p) => void (p.csv.pathSeparator = value));
+                  void refreshDiscovery("source");
+                }
+              }}
+            />
+          )}
+        </Group>
+        )}
+        {!off && !profile.csv.pathColumn && candidates.length > 0 && (
+          <Alert color="blue">
+            "{candidates[0]!.column}" looks like a section path.{" "}
+            <Anchor component="button" type="button" onClick={() => choose(candidates[0]!.column)}>
+              Use it
+            </Anchor>
+          </Alert>
+        )}
+      </Stack>
+    </Card>
+  );
+}
+
 export function StructureStep() {
   return (
     <DiscoveryGate>
@@ -27,9 +131,10 @@ export function StructureStep() {
 }
 
 function StructureEditor() {
-  const { profile, update, testrail } = useProfile();
+  const { profile, update, source: testrail } = useProfile();
   const discovery = testrail.data!;
   const structure = profile.structure;
+  const csv = profile.source === "csv";
   const mappedCount = structure.levels.length;
   const multiSuite = discovery.suites.length > 1;
 
@@ -59,25 +164,32 @@ function StructureEditor() {
     <Stack>
       <Group justify="space-between">
         <Text c="dimmed" maw={720}>
-          Every nesting level of TestRail sections becomes its own custom field in Allure TestOps, so you can build a tree like{" "}
-          <i>Epic → Feature → Story</i> instead of generic <i>Section1, Section2</i> fields.
+          Every nesting level of {csv ? "the section path" : "TestRail sections"} becomes its own custom field in Allure TestOps, so you
+          can build a tree like <i>Epic → Feature → Story</i> instead of generic <i>Section1, Section2</i> fields.
         </Text>
         <RefreshButton />
       </Group>
 
+      {csv && <PathColumnCard />}
+
+      {(!csv || profile.csv.pathColumn) && (
       <Card withBorder>
         <Stack>
           <Group justify="space-between">
             <Title order={4}>Detected structure</Title>
             <Group gap="xs">
-              <Badge variant="light">{discovery.suites.length} suite(s)</Badge>
+              {!csv && <Badge variant="light">{discovery.suites.length} suite(s)</Badge>}
               <Badge variant="light">{discovery.structure.reduce((sum, s) => sum + s.sectionCount, 0)} sections</Badge>
               <Badge variant="light" color="grape">
                 up to {discovery.maxDepth} level(s) deep
               </Badge>
             </Group>
           </Group>
-          {discovery.maxDepth === 0 && <Alert color="blue">The selected suites have no sections; only the suite can be mapped.</Alert>}
+          {discovery.maxDepth === 0 && (
+            <Alert color="blue">
+              {csv ? "The path column is empty in every row." : "The selected suites have no sections; only the suite can be mapped."}
+            </Alert>
+          )}
           {discovery.structure.length > 1 && (
             <Table withRowBorders={false} verticalSpacing={4}>
               <Table.Tbody>
@@ -100,6 +212,7 @@ function StructureEditor() {
           )}
         </Stack>
       </Card>
+      )}
 
       {multiSuite && (
         <Card withBorder>
@@ -214,12 +327,13 @@ function StructureEditor() {
         </Card>
       )}
 
+      {(!csv || profile.csv.pathColumn) && (
       <Card withBorder>
         <Stack>
           <Title order={4}>Tree</Title>
           <Switch
             label="Create an Allure TestOps tree from these fields"
-            description="The tree shows migrated cases grouped the same way as in TestRail. An existing tree with the same name is kept as is."
+            description={`The tree shows migrated cases grouped the same way as in ${csv ? "the file" : "TestRail"}. An existing tree with the same name is kept as is.`}
             checked={structure.createTree}
             onChange={(e) => {
               const value = e.currentTarget.checked;
@@ -257,7 +371,9 @@ function StructureEditor() {
           )}
         </Stack>
       </Card>
+      )}
 
+      {(!csv || profile.csv.pathColumn) && discovery.structure.some((suite) => suite.examplePaths.length > 0) && (
       <Card withBorder>
         <Stack gap="xs">
           <Title order={4}>Examples</Title>
@@ -267,7 +383,7 @@ function StructureEditor() {
           <Table verticalSpacing="xs">
             <Table.Thead>
               <Table.Tr>
-                <Table.Th>TestRail</Table.Th>
+                <Table.Th>{csv ? "Path in the file" : "TestRail"}</Table.Th>
                 <Table.Th>Allure TestOps custom fields</Table.Th>
               </Table.Tr>
             </Table.Thead>
@@ -307,6 +423,7 @@ function StructureEditor() {
           </Table>
         </Stack>
       </Card>
+      )}
     </Stack>
   );
 }

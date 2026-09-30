@@ -69,7 +69,8 @@ export function ConnectionsStep() {
       <Text c="dimmed">
         Credentials are stored only in this tool's data volume and are never included in an export unless you ask for it.
       </Text>
-      <SimpleGrid cols={{ base: 1, lg: 2 }}>
+      <SimpleGrid cols={{ base: 1, lg: profile.source === "csv" ? 1 : 2 }} maw={profile.source === "csv" ? 640 : undefined}>
+        {profile.source !== "csv" && (
         <Card withBorder>
           <Stack>
             <Title order={4}>TestRail (source)</Title>
@@ -162,6 +163,7 @@ export function ConnectionsStep() {
             <CheckAlert result={checkTestRail.data} error={checkTestRail.error} />
           </Stack>
         </Card>
+        )}
 
         <Card withBorder>
           <Stack>

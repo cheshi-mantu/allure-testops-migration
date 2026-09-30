@@ -1,5 +1,5 @@
 import { testRailRequestsPerMinute, type TestRailConnection } from "@atm/shared";
-import { HttpClient, HttpError, type Query } from "../http/httpClient.js";
+import { HttpClient, HttpError, type Query, type RetryInfo } from "../http/httpClient.js";
 import { sharedRateLimiter, type RateLimiter } from "../http/rateLimiter.js";
 import type {
   TrAttachment,
@@ -29,6 +29,7 @@ export class TestRailClient {
   constructor(
     private readonly connection: TestRailConnection,
     http?: HttpClient,
+    onRetry?: (info: RetryInfo) => void,
   ) {
     const perMinute = testRailRequestsPerMinute(connection);
     this.http =
@@ -37,6 +38,7 @@ export class TestRailClient {
         baseUrl: connection.endpoint,
         insecureTls: connection.insecureTls,
         rateLimiter: perMinute === null ? undefined : sharedRateLimiter(connection.endpoint, perMinute),
+        onRetry,
         headers: {
           Authorization: `Basic ${Buffer.from(`${connection.username}:${connection.apiKey}`).toString("base64")}`,
         },

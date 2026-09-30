@@ -1,8 +1,8 @@
 # Allure TestOps Migration
 
-A web tool that moves test cases from other test management systems into [Allure TestOps](https://qameta.io/). The first supported source is **TestRail**.
+A web tool that moves test cases into [Allure TestOps](https://qameta.io/) from **TestRail** or from any **CSV file**.
 
-Everything is configured in the browser: connect both systems, pick the projects, map TestRail suites, section levels and fields to Allure TestOps using live data from both sides, preview a converted case, do a dry run, then migrate. Running the migration again updates the migrated cases instead of duplicating them.
+Everything is configured in the browser: connect the systems, map the source structure and fields to Allure TestOps using live data from both sides, preview a converted case, do a dry run, then migrate. Running the migration again updates the migrated cases instead of duplicating them.
 
 ## Quick start
 
@@ -20,6 +20,7 @@ Profiles and run logs are stored in the `migration-data` Docker volume. Use **Ex
 ## What you need
 
 - **TestRail**: the URL, a user email and an API key (*My Settings → API Keys*). The API must be enabled in *Administration → Site Settings → API*. Read access to the project is enough.
+- **CSV**: the file. Exports from spreadsheets, other test management tools and Allure TestOps itself work.
 - **Allure TestOps**: the URL and an API token (*Your profile → API tokens*) of an account that can edit test cases in the target project. Listing users for owner mapping needs administrator rights; without them owners can still be typed in.
 
 ## The steps
@@ -51,6 +52,20 @@ Profiles and run logs are stored in the `migration-data` Docker volume. Use **Ex
 | Links to other TestRail cases | Links to the migrated Allure TestOps cases |
 
 Every migrated case gets the tag `testrail:<case id>` (the prefix is configurable). Reruns find cases by this tag, so the tool can continue or refresh a migration, including one made with the previous command line migration tool when the same prefix and shared step names are used.
+
+## CSV files
+
+Create a profile with *CSV file* as the source. The steps are Connection (Allure TestOps only), CSV file, Project, Sections, Columns, Options, Preview and Run.
+
+- **File library.** Uploaded files are kept in the data volume. Any profile can pick a file that is already there, and a file used by a profile cannot be deleted. The file itself is not part of a profile export; after importing a profile on another machine, upload the file again.
+- **Reading.** Delimiter (`,` `;` tab `|`) and encoding (UTF-8, UTF-16, Windows-1252 and others) are detected automatically and can be set by hand. Quoted cells may contain delimiters and line breaks. The first rows are shown exactly as the tool reads them.
+- **Rows and cases.** A case is one row, or several: rows without a name (or with the same id as the row before) continue the previous case, the usual layout of exports with one step per row. The tool detects this.
+- **Columns.** Every column gets a target suggested from its header and content: name, case id, description, precondition, expected result, scenario, expected results of steps, custom field, tags, layer, status, owner, member with a role, links, issues, comment, or an Allure TestOps id to update existing cases. Columns with a short list of values show all values with counts, and each value can be renamed, pointed at an existing Allure TestOps value or skipped. Multi-value cells are split by a separator.
+- **Sections.** A column with a path such as `Web > Checkout > Payment` or `/Web/Checkout/Payment` is detected; its levels are mapped to custom fields exactly like TestRail sections, including the tree.
+- **Steps.** The scenario cell may use one step per line, numbered steps, indentation for sub-steps (tabs or spaces), the Allure TestOps export syntax (`[step 1]`, `[expected.step 1.1]`), a custom regular expression, or be a single step; the format is detected. Expected results come from a marker inside the steps (for example `Expected:`) or from a separate column, matched to the steps by position.
+- **Reruns.** Cases are tagged `csv:<case id>` (or a hash of the name when the file has no id column), so running again updates the same cases.
+
+CSV files carry text only: attachments and shared steps are not part of this source.
 
 ## TestRail API rate limit
 
@@ -85,8 +100,8 @@ npm run dev:web      # optional: UI with hot reload on :5173, proxies /api to :8
 Or everything in containers, built from the sources:
 
 ```bash
-docker compose -f dev-compose.yml up --build
-docker compose -f dev-compose.yml run --rm --build tests
+docker compose -f dev-compose.yml up --build -d
+docker compose -f dev-compose.yml run --rm --build tests -d
 ```
 
 Fake server credentials: TestRail user `demo@example.com` with API key `demo-api-key`, Allure TestOps token `demo-api-token`. Inside `dev-compose.yml` use `http://mocks:4001` and `http://mocks:4002` as URLs; from the host use `http://localhost:4001` and `http://localhost:4002`.
@@ -96,7 +111,7 @@ Fake server credentials: TestRail user `demo@example.com` with API key `demo-api
 ```
 packages/
   shared/   profile schema (zod), API types, default mappings, section level mapping
-  server/   Fastify API, TestRail and Allure TestOps clients, conversion, migration engine
+  server/   Fastify API, TestRail and Allure TestOps clients, CSV reading, conversion, migration engine
   web/      React + Mantine UI
   mocks/    fake TestRail and Allure TestOps servers with a synthetic project
 ```

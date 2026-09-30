@@ -1,4 +1,4 @@
-import type { Profile, TestOpsDiscovery, TestRailDiscovery } from "@atm/shared";
+import type { Profile, SourceDiscovery, TestOpsDiscovery } from "@atm/shared";
 import { useQuery, useQueryClient, type UseQueryResult } from "@tanstack/react-query";
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { api, errorText } from "../api/client";
@@ -13,10 +13,11 @@ interface ProfileContextValue {
   flush: () => Promise<void>;
   saveState: SaveState;
   saveError: string | null;
-  testrail: UseQueryResult<TestRailDiscovery>;
+  /** Structure, fields and sample cases of the source (TestRail or CSV file). */
+  source: UseQueryResult<SourceDiscovery>;
   testops: UseQueryResult<TestOpsDiscovery>;
   /** Saves, then reloads discovery data of both systems. */
-  refreshDiscovery: (which?: "testrail" | "testops" | "both") => Promise<void>;
+  refreshDiscovery: (which?: "source" | "testops" | "both") => Promise<void>;
 }
 
 const ProfileContext = createContext<ProfileContextValue | null>(null);
@@ -103,9 +104,9 @@ export function ProfileProvider({ initial, children }: { initial: Profile; child
     };
   }, [save]);
 
-  const testrail = useQuery({
-    queryKey: ["discovery", "testrail", profile.id],
-    queryFn: () => api.discoverTestRail(profile.id),
+  const source = useQuery({
+    queryKey: ["discovery", "source", profile.id],
+    queryFn: () => api.discoverSource(profile.id),
     enabled: false,
     staleTime: Infinity,
   });
@@ -117,23 +118,23 @@ export function ProfileProvider({ initial, children }: { initial: Profile; child
   });
 
   const refreshDiscovery = useCallback(
-    async (which: "testrail" | "testops" | "both" = "both") => {
+    async (which: "source" | "testops" | "both" = "both") => {
       await save();
       const jobs: Promise<unknown>[] = [];
       if (which !== "testops") {
-        jobs.push(testrail.refetch());
+        jobs.push(source.refetch());
       }
-      if (which !== "testrail") {
+      if (which !== "source") {
         jobs.push(testops.refetch());
       }
       await Promise.all(jobs);
     },
-    [save, testrail, testops],
+    [save, source, testops],
   );
 
   const value = useMemo(
-    () => ({ profile, update, flush: save, saveState, saveError, testrail, testops, refreshDiscovery }),
-    [profile, update, save, saveState, saveError, testrail, testops, refreshDiscovery],
+    () => ({ profile, update, flush: save, saveState, saveError, source, testops, refreshDiscovery }),
+    [profile, update, save, saveState, saveError, source, testops, refreshDiscovery],
   );
   return <ProfileContext.Provider value={value}>{children}</ProfileContext.Provider>;
 }

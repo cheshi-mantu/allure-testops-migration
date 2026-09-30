@@ -5,6 +5,9 @@ import { useProfile } from "../../components/ProfileContext";
 export function OptionsStep() {
   const { profile, update } = useProfile();
   const options = profile.options;
+  const csv = profile.source === "csv";
+  const prefixMissing = options.migrationTagPrefix.trim() === "";
+  const prefixShown = prefixMissing ? "<prefix>" : options.migrationTagPrefix;
   const set = <K extends keyof MigrationOptions>(key: K, value: MigrationOptions[K]) => update((p) => void (p.options[key] = value));
 
   return (
@@ -14,12 +17,16 @@ export function OptionsStep() {
           <Title order={4}>Identification</Title>
           <TextInput
             label="Migration tag prefix"
-            description={`Every case gets the tag "${options.migrationTagPrefix}:<TestRail id>". Reruns find cases by this tag and update them. Keep "testrail" to continue a migration made with the previous migration tool.`}
+            withAsterisk
+            description={
+              csv
+                ? `Every case gets the tag "${prefixShown}:<case id>". Reruns find cases by this tag and update them.`
+                : `Every case gets the tag "${prefixShown}:<TestRail id>". Reruns find cases by this tag and update them. Keep "testrail" to continue a migration made with the previous migration tool.`
+            }
+            placeholder={csv ? "e.g. csv-regression" : "testrail"}
             value={options.migrationTagPrefix}
-            onChange={(e) => {
-              const value = e.currentTarget.value.trim();
-              set("migrationTagPrefix", value || "testrail");
-            }}
+            error={prefixMissing ? "Enter a prefix. Without it migrated cases cannot be found again, so the migration cannot start." : undefined}
+            onChange={(e) => set("migrationTagPrefix", e.currentTarget.value.trim())}
           />
           <TextInput
             label="Additional tag"
@@ -27,11 +34,13 @@ export function OptionsStep() {
             value={options.additionalTag}
             onChange={(e) => set("additionalTag", e.currentTarget.value)}
           />
+          {!csv && (
           <Switch
             label="Link back to the TestRail case"
             checked={options.selfLink}
             onChange={(e) => set("selfLink", e.currentTarget.checked)}
           />
+          )}
         </Stack>
       </Card>
 
@@ -39,8 +48,8 @@ export function OptionsStep() {
         <Stack>
           <Title order={4}>Text</Title>
           <Radio.Group
-            label="TestRail text format"
-            description="Newer TestRail versions store HTML; older ones use Markdown."
+            label={csv ? "Text format" : "TestRail text format"}
+            description={csv ? "Text cells may hold Markdown or HTML." : "Newer TestRail versions store HTML; older ones use Markdown."}
             value={options.textFormat}
             onChange={(value) => set("textFormat", value as MigrationOptions["textFormat"])}
           >
@@ -50,6 +59,7 @@ export function OptionsStep() {
               <Radio value="html" label="HTML" />
             </Stack>
           </Radio.Group>
+          {!csv && (
           <Radio.Group
             label="Steps written as plain text"
             value={options.textSteps}
@@ -60,14 +70,18 @@ export function OptionsStep() {
               <Radio value="single" label="Keep as a single step" />
             </Stack>
           </Radio.Group>
+          )}
+          {!csv && (
           <Switch
             label="Add suite and section descriptions to the case description"
             checked={options.parentDescriptions}
             onChange={(e) => set("parentDescriptions", e.currentTarget.checked)}
           />
+          )}
         </Stack>
       </Card>
 
+      {!csv && (
       <Card withBorder>
         <Stack>
           <Title order={4}>Content</Title>
@@ -91,13 +105,18 @@ export function OptionsStep() {
           />
         </Stack>
       </Card>
+      )}
 
       <Card withBorder>
         <Stack>
           <Title order={4}>Performance</Title>
           <NumberInput
             label="Cases migrated in parallel"
-            description="Higher is faster but puts more load on both servers. The TestRail rate limit (step 1) caps the pace regardless of this value."
+            description={
+              csv
+                ? "Higher is faster but puts more load on Allure TestOps."
+                : "Higher is faster but puts more load on both servers. The TestRail rate limit (step 1) caps the pace regardless of this value."
+            }
             min={1}
             max={16}
             w={260}

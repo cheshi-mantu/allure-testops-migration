@@ -1,5 +1,5 @@
 import type { TestOpsConnection } from "@atm/shared";
-import { HttpClient, HttpError, type Query } from "../http/httpClient.js";
+import { HttpClient, HttpError, type Query, type RetryInfo } from "../http/httpClient.js";
 
 /** Allure TestOps REST payloads, only the parts the migration uses. */
 
@@ -88,13 +88,14 @@ const PAGE_SIZE = 100;
 export class TestOpsClient {
   readonly http: HttpClient;
 
-  constructor(connection: TestOpsConnection, http?: HttpClient) {
+  constructor(connection: TestOpsConnection, http?: HttpClient, onRetry?: (info: RetryInfo) => void) {
     this.http =
       http ??
       new HttpClient({
         baseUrl: connection.endpoint,
         insecureTls: connection.insecureTls,
         headers: { Authorization: `Api-Token ${connection.apiToken}` },
+        onRetry,
       });
   }
 
@@ -158,8 +159,25 @@ export class TestOpsClient {
     return page?.content ?? [];
   }
 
-  customFieldValues(customFieldId: number): Promise<ToNamed[]> {
-    return this.all<ToNamed>("api/rs/cfv", { customFieldId });
+  /**
+   * Values of a custom field matching a query, lightweight (no test case counts). Global fields on
+   * big instances have many thousands of values, so callers look values up instead of listing them all.
+   */
+  async suggestCustomFieldValues(customFieldId: number, query = "", size = 100, projectId?: number): Promise<ToNamed[]> {
+    const page = await this.http.get<ToPage<ToNamed> | ToNamed[]>("api/rs/cfv/suggest", { customFieldId, query, projectId, page: 0, size });
+    return Array.isArray(page) ? page : (page?.content ?? []);
+  }
+
+  /** Which of the given values already exist for a custom field. */
+  async existingCustomFieldValues(customFieldId: number, values: string[]): Promise<Set<string>> {
+    const found = new Set<string>();
+    for (const value of values) {
+      const matches = await this.suggestCustomFieldValues(customFieldId, value, 50);
+      if (matches.some((m) => m.name === value)) {
+        found.add(value);
+      }
+    }
+    return found;
   }
 
   createCustomField(name: string): Promise<ToCustomField> {
@@ -205,6 +223,10 @@ export class TestOpsClient {
     return page?.content?.[0] ?? null;
   }
 
+  getTestCase(testCaseId: number): Promise<ToTestCase> {
+    return this.http.get<ToTestCase>(`api/rs/testcase/${testCaseId}`);
+  }
+
   createTestCase(projectId: number, name: string): Promise<ToTestCase> {
     return this.http.json<ToTestCase>("POST", "api/rs/testcase", { body: { projectId, name } });
   }
@@ -229,11 +251,15 @@ export class TestOpsClient {
     return this.http.json("POST", `api/rs/testcase/${testCaseId}/issue`, { body: issues });
   }
 
-  /** Role -1 is the owner role on Allure TestOps. */
-  setOwner(testCaseId: number, username: string): Promise<unknown> {
-    return this.http.json("POST", `api/rs/testcase/${testCaseId}/members`, {
-      body: [{ name: username, role: { id: -1 } }],
-    });
+  /** Replaces the members of a test case. Role -1 is the owner role. */
+  setMembers(testCaseId: number, members: { name: string; role: { id: number } }[]): Promise<unknown> {
+    return this.http.json("POST", `api/rs/testcase/${testCaseId}/members`, { body: members });
+  }
+
+  /** Member roles such as Owner or Reviewer. */
+  async roles(): Promise<ToNamed[]> {
+    const response = await this.http.get<ToNamed[] | ToPage<ToNamed>>("api/rs/role");
+    return Array.isArray(response) ? response : (response?.content ?? []);
   }
 
   comments(testCaseId: number): Promise<ToComment[]> {

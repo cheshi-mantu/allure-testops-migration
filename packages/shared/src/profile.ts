@@ -86,6 +86,47 @@ export const StructureMappingSchema = z.object({
 });
 export type StructureMapping = z.infer<typeof StructureMappingSchema>;
 
+export const SOURCES = ["testrail", "csv"] as const;
+export type SourceType = (typeof SOURCES)[number];
+
+export const CSV_ENCODINGS = ["auto", "utf-8", "utf-16le", "utf-16be", "windows-1252", "windows-1251", "iso-8859-1"] as const;
+export const CSV_STEP_FORMATS = ["auto", "lines", "indented", "numbered", "testops", "regex", "single"] as const;
+
+/** How a CSV file is read and how its rows become test cases. */
+export const CsvSourceSchema = z.object({
+  /** File in the tool's file library (data volume). */
+  fileId: z.string().nullable().default(null),
+  /** `auto` detects `,`, `;`, tab or `|`. */
+  delimiter: z.string().default("auto"),
+  quote: z.string().length(1).default('"'),
+  encoding: z.enum(CSV_ENCODINGS).default("auto"),
+  /**
+   * `single`: every row is a test case. `multi`: a row without a name (or with the same id as the row before)
+   * continues the previous case, typically adding one more step. `auto` decides from the data.
+   */
+  rows: z.enum(["auto", "single", "multi"]).default("auto"),
+  /** Column holding the section path, e.g. `Web > Checkout > Payment`. Its levels are mapped like TestRail sections. */
+  pathColumn: z.string().nullable().default(null),
+  /** The user decided the file has no section path: no hints or warnings about it. */
+  withoutPath: z.boolean().default(false),
+  /** Separator between path levels, `auto` detects ` > `, `/`, `\\`, `»`, `::` or `|`. */
+  pathSeparator: z.string().default("auto"),
+  /** Trial run: only cases with these ids or names. Empty means all. */
+  onlyCases: z.array(z.string()).default([]),
+  /** How the scenario column is split into steps. */
+  steps: z
+    .object({
+      format: z.enum(CSV_STEP_FORMATS).default("auto"),
+      /** For `regex`: every match starts a new step, e.g. `Step\\s+\\d+[:.]`. */
+      stepPattern: z.string().default(""),
+      /** Lines or sub-steps starting with a match become the expected result of their step, e.g. `(?i)expected( result)?:`. */
+      expectedPattern: z.string().default(""),
+    })
+    .prefault({}),
+});
+export type CsvSource = z.infer<typeof CsvSourceSchema>;
+export type CsvStepFormat = (typeof CSV_STEP_FORMATS)[number];
+
 export const TEXT_TARGETS = ["description", "precondition", "expectedResult"] as const;
 export type TextTarget = (typeof TEXT_TARGETS)[number];
 
@@ -105,6 +146,16 @@ export const FieldTargetSchema = z.discriminatedUnion("kind", [
   }),
   z.object({ kind: z.literal("comment") }),
   z.object({ kind: z.literal("scenario") }),
+  /** CSV: expected results lined up with the steps of the scenario column. */
+  z.object({ kind: z.literal("scenarioExpected") }),
+  /** CSV: the test case name. */
+  z.object({ kind: z.literal("name") }),
+  /** CSV: a stable id of the case in the source; reruns find migrated cases by it. */
+  z.object({ kind: z.literal("sourceId") }),
+  /** CSV: id of an existing Allure TestOps test case to update, e.g. in a file exported from Allure TestOps. */
+  z.object({ kind: z.literal("allureId") }),
+  /** Test case members with an Allure TestOps role, e.g. Reviewer. */
+  z.object({ kind: z.literal("role"), role: z.string().default("") }),
 ]);
 export type FieldTarget = z.infer<typeof FieldTargetSchema>;
 export type FieldTargetKind = FieldTarget["kind"];
@@ -125,11 +176,11 @@ export const FieldMappingSchema = z.object({
 export type FieldMapping = z.infer<typeof FieldMappingSchema>;
 
 export const MigrationOptionsSchema = z.object({
-  /** Tag `<prefix>:<caseId>` identifies migrated cases, so reruns update instead of duplicating. */
-  migrationTagPrefix: z.string().min(1).default("testrail"),
+  /** Tag `<prefix>:<caseId>` identifies migrated cases, so reruns update instead of duplicating. Required to run; may be empty while editing. */
+  migrationTagPrefix: z.string().default("testrail"),
   /** Extra tag put on every migrated case, e.g. the migration date. */
   additionalTag: z.string().default(""),
-  /** Add a link back to the TestRail case. */
+  /** Add a link back to the source case (TestRail only). */
   selfLink: z.boolean().default(true),
   /** How to read TestRail text: `auto` detects HTML produced by the new TestRail editor. */
   textFormat: z.enum(["auto", "markdown", "html"]).default("auto"),
@@ -150,13 +201,14 @@ export const ProfileSchema = z.object({
   formatVersion: z.literal(PROFILE_FORMAT_VERSION).default(PROFILE_FORMAT_VERSION),
   id: z.string().min(1),
   name: z.string().min(1),
-  source: z.literal("testrail").default("testrail"),
+  source: z.enum(SOURCES).default("testrail"),
   createdAt: z.string(),
   updatedAt: z.string(),
   testrail: z.object({
     connection: TestRailConnectionSchema.prefault({}),
     scope: TestRailScopeSchema.prefault({}),
   }).prefault({}),
+  csv: CsvSourceSchema.prefault({}),
   testops: z.object({
     connection: TestOpsConnectionSchema.prefault({}),
     scope: TestOpsScopeSchema.prefault({}),

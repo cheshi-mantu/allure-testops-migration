@@ -1,18 +1,43 @@
 import type { TestOpsDiscovery, TestRailFieldInfo } from "./api.js";
-import { ProfileSchema, type FieldMapping, type FieldTarget, type Profile } from "./profile.js";
+import { ProfileSchema, type FieldMapping, type FieldTarget, type Profile, type SourceType } from "./profile.js";
 
-export function newProfile(id: string, name: string, now = new Date()): Profile {
+export function newProfile(id: string, name: string, now = new Date(), source: SourceType = "testrail"): Profile {
   return ProfileSchema.parse({
     id,
     name,
+    source,
     createdAt: now.toISOString(),
     updatedAt: now.toISOString(),
+    ...(source === "csv"
+      ? { options: { migrationTagPrefix: "csv", selfLink: false }, structure: { treeName: "CSV sections" } }
+      : {}),
   });
 }
 
 /** Field targets that make sense for a TestRail field, most natural first. */
 export function allowedTargets(field: TestRailFieldInfo): FieldTarget["kind"][] {
   switch (field.kind) {
+    case "column":
+      return [
+        "name",
+        "sourceId",
+        "description",
+        "precondition",
+        "expectedResult",
+        "scenario",
+        "scenarioExpected",
+        "customField",
+        "tag",
+        "layer",
+        "status",
+        "owner",
+        "role",
+        "link",
+        "issue",
+        "comment",
+        "allureId",
+        "ignore",
+      ];
     case "steps":
       return ["scenario", "ignore"];
     case "text":
@@ -44,6 +69,13 @@ const TEXT_DEFAULTS: Record<string, FieldTarget> = {
 
 /** A sensible first mapping for a TestRail field. The user reviews every suggestion in the UI. */
 export function suggestTarget(field: TestRailFieldInfo, testops?: TestOpsDiscovery | null): FieldTarget {
+  if (field.suggestedTarget) {
+    const target = field.suggestedTarget;
+    if (target.kind === "issue" && target.integrationId === null && testops?.integrations.length === 1) {
+      return { kind: "issue", integrationId: testops.integrations[0]!.id };
+    }
+    return target;
+  }
   const preset = TEXT_DEFAULTS[field.systemName];
   if (preset) {
     return preset;
@@ -85,7 +117,7 @@ export function suggestMapping(field: TestRailFieldInfo, testops?: TestOpsDiscov
     source: field.systemName,
     target: suggestTarget(field, testops),
     values: field.kind === "checkbox" ? { "1": "Yes", "0": null } : {},
-    separator: field.systemName === "refs" ? "," : "",
+    separator: field.suggestedSeparator ?? (field.systemName === "refs" ? "," : ""),
   };
 }
 
