@@ -97,7 +97,7 @@ export function OptionsStep() {
           <Title order={4}>Performance</Title>
           <NumberInput
             label="Cases migrated in parallel"
-            description="Higher is faster but puts more load on both servers. TestRail rate limits are respected automatically."
+            description="Higher is faster but puts more load on both servers. The TestRail rate limit (step 1) caps the pace regardless of this value."
             min={1}
             max={16}
             w={260}

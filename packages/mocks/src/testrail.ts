@@ -8,6 +8,10 @@ export interface TestRailMockOptions {
   legacyPagination?: boolean;
   /** Inline images only load with this session cookie, like TestRail 7.x with the new attachment storage. */
   sessionCookie?: string;
+  /** Answer 429 with Retry-After when more than `requests` arrive within `windowMs`, like TestRail Cloud. */
+  rateLimit?: { requests: number; windowMs: number; retryAfterSeconds?: number };
+  /** Filled in by the mock: requests seen and requests rejected with 429. */
+  stats?: { requests: number; throttled: number };
 }
 
 /** A fake TestRail API v2 serving the synthetic data set. */
@@ -16,6 +20,31 @@ export function createTestRailMock(options: TestRailMockOptions = {}): FastifyIn
   const apiKey = options.apiKey ?? "demo-api-key";
   const expected = `Basic ${Buffer.from(`${username}:${apiKey}`).toString("base64")}`;
   const app = Fastify({ logger: false });
+  const stamps: number[] = [];
+
+  app.addHook("onRequest", async (_request, reply) => {
+    if (options.stats) {
+      options.stats.requests += 1;
+    }
+    const limit = options.rateLimit;
+    if (!limit) {
+      return;
+    }
+    const now = Date.now();
+    while (stamps.length > 0 && stamps[0]! <= now - limit.windowMs) {
+      stamps.shift();
+    }
+    if (stamps.length >= limit.requests) {
+      if (options.stats) {
+        options.stats.throttled += 1;
+      }
+      return reply
+        .status(429)
+        .header("Retry-After", String(limit.retryAfterSeconds ?? 1))
+        .send({ error: "API rate limit exceeded" });
+    }
+    stamps.push(now);
+  });
 
   const page = (reply: FastifyReply, key: string, items: unknown[], params: URLSearchParams) => {
     if (options.legacyPagination) {

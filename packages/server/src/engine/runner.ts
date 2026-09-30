@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
-import type { LogLevel, Profile, RunLogEntry, RunSummary } from "@atm/shared";
+import { testRailRequestsPerMinute, type LogLevel, type Profile, type RunLogEntry, type RunSummary } from "@atm/shared";
 import { transformCase, type SourceContext } from "../convert/transform.js";
+import { sharedRateLimiter, type RateLimiter } from "../http/rateLimiter.js";
 import { TestOpsClient } from "../testops/client.js";
 import { discoverTestOps, requireTestOpsProject } from "../testops/discovery.js";
 import { loadTestRailContext } from "../testrail/discovery.js";
@@ -21,6 +22,7 @@ export class Run {
   private readonly listeners = new Set<Listener>();
   private cancelled = false;
   private flushTimer: NodeJS.Timeout | null = null;
+  private rateLimit: { limiter: RateLimiter; requests: number; waitedMs: number } | null = null;
 
   constructor(
     private readonly profile: Profile,
@@ -114,6 +116,11 @@ export class Run {
           ? `Dry run finished: ${total} case(s) checked, ${failed} with errors.`
           : `Finished: ${created} created, ${updated} updated, ${failed} failed, ${skipped} skipped of ${total}.`,
       );
+      if (this.rateLimit) {
+        const { limiter, requests, waitedMs } = this.rateLimit;
+        const waited = Math.round((limiter.waitedMs - waitedMs) / 1000);
+        this.log("info", `TestRail API: ${limiter.requests - requests} request(s)${waited > 0 ? `, ${waited}s spent waiting for the rate limit` : ""}.`);
+      }
       this.emitSummary();
       await this.flush();
     }
@@ -122,6 +129,14 @@ export class Run {
   private async work() {
     const profile = this.profile;
     this.phase("Connecting to TestRail");
+    const perMinute = testRailRequestsPerMinute(profile.testrail.connection);
+    if (perMinute === null) {
+      this.log("info", "TestRail rate limit: off.");
+    } else {
+      const limiter = sharedRateLimiter(profile.testrail.connection.endpoint, perMinute);
+      this.rateLimit = { limiter, requests: limiter.requests, waitedMs: limiter.waitedMs };
+      this.log("info", `TestRail rate limit: ${perMinute} requests per minute, shared by everything this tool sends to that TestRail instance.`);
+    }
     const trContext = await loadTestRailContext(profile);
     trContext.warnings.forEach((warning) => this.log("warn", warning));
     const context: SourceContext = {
@@ -292,6 +307,15 @@ export class Run {
       this.log("info", exists ? `Tree "${this.profile.structure.treeName}" already exists and is kept.` : `Tree "${this.profile.structure.treeName}" will be created.`);
     }
     this.log("info", `${sharedSteps.size} shared step(s) and ${attachments} inline attachment(s) are referenced; attachments of cases are migrated too.`);
+    // One attachment listing per case, one download per attachment, one read per shared step.
+    const requests = cases.length + attachments + sharedSteps.size;
+    const perMinute = testRailRequestsPerMinute(this.profile.testrail.connection);
+    this.log(
+      "info",
+      perMinute === null
+        ? `The migration needs at least ${requests} more TestRail request(s).`
+        : `The migration needs at least ${requests} more TestRail request(s): about ${Math.max(1, Math.ceil(requests / perMinute))} minute(s) or more at ${perMinute} requests per minute.`,
+    );
     this.emitSummary();
   }
 

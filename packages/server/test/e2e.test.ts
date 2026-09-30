@@ -37,6 +37,9 @@ describe("TestRail to Allure TestOps migration", () => {
       apiKey: "demo-api-key",
       sessionCookie: "tr_session=abc",
       insecureTls: false,
+      // The fake server has no limit; the limiter has its own tests.
+      rateLimit: "off",
+      requestsPerMinute: 180,
     };
     profile.testrail.scope.projectId = 1;
     profile.testops.connection = { endpoint: url(testops.app.server.address() as AddressInfo), apiToken: "demo-api-token", insecureTls: false };
