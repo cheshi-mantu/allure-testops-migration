@@ -8,7 +8,7 @@
 
 services:
   migration:
-    image: ${MIGRATION_IMAGE:-ghcr.io/qameta/allure-testops-migration:latest}
+    image: ${MIGRATION_IMAGE:-ghcr.io/cheshi-mantu/allure-testops-migration:latest}
     restart: unless-stopped
     ports:
       # The UI has no login of its own: it is published on this machine only.
