@@ -24,6 +24,7 @@ import { discoverTestOps } from "../testops/discovery.js";
 import { discoverTestRail, loadTestRailContext } from "../testrail/discovery.js";
 import { groupCases } from "../csv/cases.js";
 import { analyseColumns, discoverCsv, loadCsv } from "../csv/discovery.js";
+import { CaseSkipped } from "../engine/errors.js";
 import { prepareSource } from "../engine/sources.js";
 import type { FileStore } from "../storage/fileStore.js";
 import { checkTestOps, checkTestRail } from "./checks.js";
@@ -249,8 +250,12 @@ export async function registerApi(app: FastifyInstance, deps: ApiDeps): Promise<
       if (!testCase) {
         throw Object.assign(new Error(`No case "${rawId}" in the file.`), { statusCode: 404 });
       }
-      const { planned, linkedCaseIds } = source.transform(testCase);
-      return { ...planned, linkedCaseIds };
+      try {
+        const { planned, linkedCaseIds } = source.transform(testCase);
+        return { ...planned, linkedCaseIds };
+      } catch (error) {
+        throw error instanceof CaseSkipped ? Object.assign(error, { statusCode: 422 }) : error;
+      }
     }
     const caseId = Number(rawId.replace(/^C/i, ""));
     if (!Number.isInteger(caseId) || caseId <= 0) {

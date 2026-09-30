@@ -301,7 +301,11 @@ function RunDetails({ profile, run }: { profile: Profile; run: RunSummary }) {
           <Badge variant="light" color={counters.failed ? "red" : "gray"}>
             {counters.failed} failed
           </Badge>
-          {counters.skipped > 0 && !summary.dryRun && <Badge variant="light" color="gray">{counters.skipped} skipped</Badge>}
+          {counters.skipped > 0 && (
+            <Badge variant="light" color="orange">
+              {counters.skipped} {profile.source === "csv" ? "cannot be imported" : "skipped"}
+            </Badge>
+          )}
         </Group>
         {summary.error && <Alert color="red">{summary.error}</Alert>}
         <Group justify="space-between">

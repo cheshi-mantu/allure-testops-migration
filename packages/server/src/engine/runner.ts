@@ -4,6 +4,7 @@ import { sharedRateLimiter, type RateLimiter } from "../http/rateLimiter.js";
 import { TestOpsClient } from "../testops/client.js";
 import { discoverTestOps, requireTestOpsProject } from "../testops/discovery.js";
 import type { RunStore } from "../storage/runs.js";
+import { CaseSkipped } from "./errors.js";
 import { TargetResolver } from "./targets.js";
 import { prepareSource, type PreparedSource, type SourceCase, type SourceDeps } from "./sources.js";
 import { TestOpsWriter } from "./writer.js";
@@ -112,7 +113,7 @@ export class Run {
       this.log(
         "info",
         this.summary.dryRun
-          ? `Dry run finished: ${total} case(s) checked, ${failed} with errors.`
+          ? `Dry run finished: ${total} case(s) checked, ${failed} with errors, ${skipped} cannot be imported.`
           : `Finished: ${created} created, ${updated} updated, ${failed} failed, ${skipped} skipped of ${total}.`,
       );
       if (this.rateLimit) {
@@ -206,6 +207,11 @@ export class Run {
       this.log("info", `${written.created ? "Created" : "Updated"} "${result.planned.name}"`, testCase.key, written.testCaseId);
       return result;
     } catch (error) {
+      if (error instanceof CaseSkipped) {
+        this.summary.counters.skipped += 1;
+        this.log("warn", error.message, testCase.key);
+        return null;
+      }
       this.summary.counters.failed += 1;
       this.log("error", `Failed "${testCase.title}": ${errorMessage(error)}`, testCase.key);
       return null;
@@ -247,8 +253,13 @@ export class Run {
         planned.scenario.forEach((step) => step.type === "shared" && sharedSteps.add(step.sourceId));
         attachments += planned.attachments.length;
         issuesWithoutIntegration += planned.issues.filter((issue) => issue.integrationId === null).length;
-        this.summary.counters.skipped += 1;
       } catch (error) {
+        if (error instanceof CaseSkipped) {
+          this.summary.counters.skipped += 1;
+          this.log("warn", error.message, testCase.key);
+          this.summary.counters.processed += 1;
+          continue;
+        }
         this.summary.counters.failed += 1;
         this.log("error", `Cannot convert "${testCase.title}": ${errorMessage(error)}`, testCase.key);
       }

@@ -39,16 +39,28 @@ export function compilePattern(pattern: string, extraFlags = ""): RegExp {
   return new RegExp(source, flags);
 }
 
-const TESTOPS_LINE = /^(\t*)\[(step|attachment|shared|expected|expected\.step|expected\.attachment)(?:\s[\d.]*)?\]\s?(.*)$/;
-const NUMBERED_LINE = /^\s*(\d+)[.)]\s+(.*)$/;
+/** "Step 1:", "Substep 1.2 -", "Шаг 3." at the start of a step: the numbering Allure TestOps adds itself. */
+const STEP_PREFIX = /^(?:sub ?step|step|подшаг|шаг)\s*[\d.]*\s*[:.)\-–]\s*(?=\S)/i;
+/** Several "Step:" markers inside one line: "Step: open Step: click". */
+const INLINE_MARKER = /(?:^|\s)(?:step|шаг)\s*\d*\s*[:.)]\s*/gi;
 
-export function detectStepFormat(text: string): Exclude<CsvStepFormat, "auto" | "regex"> {
+const TESTOPS_LINE = /^(\t*)\[(step|attachment|shared|expected|expected\.step|expected\.attachment)(?:\s[\d.]*)?\]\s?(.*)$/;
+/** "1. text", "2) text" and "3.text", but not "1.5 kg". */
+const NUMBERED_LINE = /^\s*(\d+)[.)](?!\d)\s*(\S.*)$/;
+
+/** `inline` means step markers inside a line, e.g. "Step: open Step: click". */
+export type DetectedStepFormat = Exclude<CsvStepFormat, "auto" | "regex"> | "inline";
+
+export function detectStepFormat(text: string): DetectedStepFormat {
   const lines = text.split(/\r?\n/).filter((l) => l.trim() !== "");
   if (lines.length === 0) {
     return "lines";
   }
   if (lines.some((l) => TESTOPS_LINE.test(l))) {
     return "testops";
+  }
+  if (lines.some((l) => (l.match(INLINE_MARKER)?.length ?? 0) >= 2)) {
+    return "inline";
   }
   if (lines.filter((l) => NUMBERED_LINE.test(l)).length >= 2) {
     return "numbered";
@@ -82,6 +94,9 @@ export function parseSteps(text: string, options: StepParseOptions): PlannedStep
     case "regex":
       steps = options.stepPattern ? byPattern(source, compilePattern(options.stepPattern, "g")) : lines(source);
       break;
+    case "inline":
+      steps = byPattern(source, new RegExp(INLINE_MARKER.source, "gi"));
+      break;
     default:
       steps = lines(source);
   }
@@ -89,7 +104,13 @@ export function parseSteps(text: string, options: StepParseOptions): PlannedStep
     const marker = compilePattern(options.expectedPattern);
     steps.forEach((s) => extractExpected(s, marker));
   }
+  steps.forEach(stripStepPrefix);
   return steps;
+}
+
+function stripStepPrefix(target: Step) {
+  target.body = target.body.replace(STEP_PREFIX, "");
+  target.steps?.forEach((child) => child.type === "step" && stripStepPrefix(child));
 }
 
 function lines(text: string): Step[] {
@@ -97,7 +118,7 @@ function lines(text: string): Step[] {
     .split("\n")
     .map((l) => l.trim())
     .filter(Boolean)
-    .map((l) => step(l.replace(/^[-*•]\s+/, "")));
+    .map((l) => step(l.replace(/^(?:\d+[.)](?!\d)\s*|[-*•]\s+)/, "")));
 }
 
 function numbered(text: string): Step[] {
@@ -285,30 +306,65 @@ function findInline(text: string, marker: RegExp): number {
   return match ? match.index : -1;
 }
 
+export interface ExpectedItem {
+  text: string;
+  /** Step number the item names ("3. ..."), when the text is numbered. */
+  number?: number;
+}
+
 /**
- * Lines up expected results from a separate column with the steps: the n-th expected result goes to
- * the n-th step. A single expected result for several steps belongs to the last step; extra ones are
- * added to the last step too.
+ * Lines up expected results from a separate column with the steps. Numbered items go to the step with
+ * that number ("3. Saved" belongs to step 3 even when step 2 has no expected result); others go in order.
+ * A single unnumbered expected result for several steps belongs to the last step.
  */
-export function attachExpected(steps: PlannedStep[], expected: string[]): void {
+export function attachExpected(steps: PlannedStep[], expected: (ExpectedItem | string)[]): void {
   const targets = steps.filter((s): s is Step => s.type === "step");
-  if (targets.length === 0 || expected.length === 0) {
+  const items = expected.map((e) => (typeof e === "string" ? { text: e } : e)).filter((e) => e.text);
+  if (targets.length === 0 || items.length === 0) {
     return;
   }
   const add = (target: Step, text: string) => {
     target.expected = target.expected ? `${target.expected}\n${text}` : text;
   };
-  if (expected.length === 1 && targets.length > 1) {
-    add(targets[targets.length - 1]!, expected[0]!);
+  if (items.length === 1 && items[0]!.number === undefined && targets.length > 1) {
+    const lines = items[0]!.text.split("\n").map((l) => l.trim()).filter(Boolean);
+    if (lines.length === targets.length) {
+      // As many lines as steps: one expected result per step.
+      lines.forEach((line, index) => add(targets[index]!, line));
+    } else {
+      add(targets[targets.length - 1]!, items[0]!.text);
+    }
     return;
   }
-  expected.forEach((text, index) => add(targets[Math.min(index, targets.length - 1)]!, text));
+  items.forEach((item, index) => {
+    const position = item.number !== undefined && item.number >= 1 ? item.number - 1 : index;
+    add(targets[Math.min(position, targets.length - 1)]!, item.text);
+  });
 }
 
-/** Expected results from a separate column, split the same way as steps but flattened to texts. */
-export function parseExpectedTexts(text: string, options: StepParseOptions): string[] {
-  const parsed = parseSteps(text, { ...options, expectedPattern: "" });
-  const flatten = (s: PlannedStep): string =>
-    s.type === "step" ? [s.body, ...(s.steps ?? []).map(flatten)].join("\n") : s.name;
-  return parsed.map(flatten).filter(Boolean);
+/** Expected results from a separate column: numbered items keep their number, others are split like steps. */
+export function parseExpectedTexts(text: string, options: StepParseOptions): ExpectedItem[] {
+  const source = text.replace(/\r\n?/g, "\n");
+  const numbered = source.split("\n").filter((l) => l.trim()).filter((l) => NUMBERED_LINE.test(l));
+  const firstLine = source.trimStart().split("\n")[0] ?? "";
+  if (numbered.length > 0 && NUMBERED_LINE.test(firstLine)) {
+    const items: ExpectedItem[] = [];
+    for (const line of source.split("\n")) {
+      if (!line.trim()) {
+        continue;
+      }
+      const match = NUMBERED_LINE.exec(line);
+      if (match) {
+        items.push({ number: Number(match[1]), text: match[2]!.trim() });
+      } else if (items.length > 0) {
+        items[items.length - 1]!.text += `\n${line.trim()}`;
+      }
+    }
+    return items;
+  }
+  const parsed = parseSteps(source, { ...options, expectedPattern: "" });
+  const flatten = (s: PlannedStep): string => (s.type === "step" ? [s.body, ...(s.steps ?? []).map(flatten)].join("\n") : s.name);
+  // An unstructured cell is one expected result, not one per line.
+  const format = options.format === "auto" ? detectStepFormat(source) : options.format;
+  return format === "lines" ? [{ text: source.trim() }] : parsed.map((s) => ({ text: flatten(s) })).filter((e) => e.text);
 }

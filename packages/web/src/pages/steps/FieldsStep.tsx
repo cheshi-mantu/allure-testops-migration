@@ -215,7 +215,7 @@ function FieldsEditor() {
       {csv && nameColumns.length !== 1 && (
         <Alert color="red">
           {nameColumns.length === 0
-            ? "Map one column to the test case name."
+            ? "Map one column to the test case name. The name is the only required value: nothing is imported without it, and records with an empty name are skipped."
             : `Only one column can be the test case name; now: ${nameColumns.join(", ")}.`}
         </Alert>
       )}
@@ -445,7 +445,11 @@ function StepFormatSettings() {
         allowDeselect={false}
         data={STEP_FORMATS}
         value={steps.format}
-        description={steps.format === "auto" && detected ? `Detected: ${STEP_FORMATS.find((f) => f.value === detected)?.label ?? detected}` : undefined}
+        description={
+          steps.format === "auto" && detected
+            ? `Detected: ${detected === "inline" ? "“Step:” markers inside one line" : (STEP_FORMATS.find((f) => f.value === detected)?.label ?? detected)}`
+            : undefined
+        }
         onChange={(value) => value && set((s) => void (s.format = value as CsvStepFormat))}
       />
       {steps.format === "regex" && (

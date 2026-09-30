@@ -33,6 +33,16 @@ const DELIMITERS = [
   { value: "|", label: "Pipe  |" },
 ];
 
+function tagPrefixFor(fileName: string): string {
+  const stem = fileName
+    .replace(/\.[^.]+$/, "")
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, "-")
+    .replace(/^-|-$/g, "")
+    .slice(0, 40);
+  return stem ? `csv-${stem}` : "csv";
+}
+
 function size(bytes: number): string {
   return bytes < 1024 ? `${bytes} B` : bytes < 1024 * 1024 ? `${(bytes / 1024).toFixed(1)} KB` : `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 }
@@ -62,8 +72,13 @@ export function FileStep() {
     forgetDiscovery();
   };
   const choose = (fileId: string) => {
+    const file = files.data?.find((f) => f.id === fileId);
     update((p) => {
       p.csv.fileId = fileId;
+      // Ids like 1, 2, 3 repeat between files: a tag prefix per file keeps two imports into one project apart.
+      if (file && p.options.migrationTagPrefix === "csv") {
+        p.options.migrationTagPrefix = tagPrefixFor(file.name);
+      }
     });
     forgetDiscovery();
     // "Used by" is computed from saved profiles.
@@ -73,8 +88,15 @@ export function FileStep() {
   const upload = useMutation({
     mutationFn: (file: File) => api.uploadFile(file),
     onSuccess: (file) => {
+      queryClient.setQueryData(["files"], (list: typeof files.data) => [{ ...file, usedBy: [] }, ...(list ?? [])]);
       void queryClient.invalidateQueries({ queryKey: ["files"] });
-      choose(file.id);
+      update((p) => {
+        p.csv.fileId = file.id;
+        if (p.options.migrationTagPrefix === "csv") {
+          p.options.migrationTagPrefix = tagPrefixFor(file.name);
+        }
+      });
+      forgetDiscovery();
       notifications.show({ color: "green", message: `Uploaded "${file.name}".` });
     },
     onError: (error) => notifications.show({ color: "red", title: "Upload failed", message: errorText(error) }),

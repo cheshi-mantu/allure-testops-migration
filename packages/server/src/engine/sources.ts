@@ -89,6 +89,9 @@ async function prepareTestRail(profile: Profile, log: Log): Promise<PreparedSour
 type CsvSourceCase = SourceCase & { raw: CsvCase };
 
 async function prepareCsv(profile: Profile, deps: SourceDeps, log: Log): Promise<PreparedSource<CsvSourceCase>> {
+  if (!profile.fields.some((m) => m.target.kind === "name")) {
+    throw new Error("No column is mapped to the test case name. Map one on the Columns step: nothing is imported without a name.");
+  }
   const { table, fileName } = await loadCsv(profile, deps.files);
   table.warnings.forEach((warning) => log("warn", warning));
   const grouped = groupCases(table, profile);
@@ -110,7 +113,7 @@ async function prepareCsv(profile: Profile, deps: SourceDeps, log: Log): Promise
     testrail: null,
     transform: (testCase) => transformCsvCase(testCase.raw, context),
     readCases: async () => {
-      const cases = grouped.cases.map((raw) => ({ key: raw.key, title: raw.name || `Line ${raw.line}`, raw }));
+      const cases = grouped.cases.map((raw) => ({ key: raw.key, title: raw.name || `line ${raw.line}`, raw }));
       // A trial run on a few cases, chosen by id or name.
       const only = new Set(profile.csv.onlyCases.map((v) => v.trim().toLowerCase()).filter(Boolean));
       return only.size > 0 ? cases.filter((c) => only.has(c.key.toLowerCase()) || only.has(c.title.toLowerCase())) : cases;

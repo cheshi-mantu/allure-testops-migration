@@ -91,9 +91,9 @@ export function groupCases(table: CsvTable, profile: Profile): GroupResult {
     }
   }
   if (!nameColumn) {
-    warnings.push("No column is mapped to the test case name.");
+    warnings.push("No column is mapped to the test case name, so nothing can be imported.");
   } else if (unnamed > 0) {
-    warnings.push(`${unnamed} case(s) have no name; they will fail to migrate.`);
+    warnings.push(`${unnamed} record(s) have no name; they cannot be imported and are skipped.`);
   }
   if (!idColumn) {
     warnings.push("No column is mapped to the source id, so cases are recognised by name on reruns. Renaming a case in the file creates a new one.");

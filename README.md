@@ -100,8 +100,8 @@ npm run dev:web      # optional: UI with hot reload on :5173, proxies /api to :8
 Or everything in containers, built from the sources:
 
 ```bash
-docker compose -f dev-compose.yml up --build
-docker compose -f dev-compose.yml run --rm --build tests
+docker compose -f dev-compose.yml up --build -d
+docker compose -f dev-compose.yml run --rm --build tests -d
 ```
 
 Fake server credentials: TestRail user `demo@example.com` with API key `demo-api-key`, Allure TestOps token `demo-api-token`. Inside `dev-compose.yml` use `http://mocks:4001` and `http://mocks:4002` as URLs; from the host use `http://localhost:4001` and `http://localhost:4002`.

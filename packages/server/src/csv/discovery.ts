@@ -1,6 +1,5 @@
 import {
   mergeSuggestedMappings,
-  type FieldTarget,
   type Profile,
   type SectionLevelInfo,
   type SourceDiscovery,
@@ -10,10 +9,12 @@ import type { FileStore } from "../storage/fileStore.js";
 import { columnFor, groupCases, values, type CsvCase } from "./cases.js";
 import { readTable, type CsvTable } from "./parse.js";
 import { detectStepFormat } from "./steps.js";
+import { suggestColumns, type Suggestion } from "./suggest.js";
 
 const PATH_SEPARATORS = [" > ", ">", " / ", "/", " \\ ", "\\", " » ", "»", "::", " | "];
 const OPTION_LIMIT = 200;
-const PATH_HEADER = /path|folder|section|suite|hierarch|module|tree/i;
+const PATH_HEADER = /path|folder|section|suite|hierarch|module|tree|путь|папка|раздел/i;
+const PATH_ONLY_HEADER = /hierarch|path|folder|tree|путь|папка|иерархи/i;
 const EXAMPLES = 3;
 
 export interface LoadedCsv {
@@ -45,7 +46,11 @@ export function detectPathSeparator(samples: string[]): string | null {
   let best: string | null = null;
   let bestShare = 0;
   for (const separator of PATH_SEPARATORS) {
-    const share = filled.filter((v) => v.includes(separator)).length / filled.length;
+    // A lone unspaced "/" is often part of a name ("Install/Uninstall"): require a real path shape.
+    const unspaced = separator.trim() === separator && ["/", "\\", ">"].includes(separator);
+    const matches = (v: string) =>
+      unspaced ? v.startsWith(separator) || v.split(separator).length > 2 : v.includes(separator);
+    const share = filled.filter(matches).length / filled.length;
     if (share > bestShare + 0.001) {
       best = separator;
       bestShare = share;
@@ -60,60 +65,6 @@ export function splitPath(value: string, separator: string): string[] {
     .split(separator)
     .map((part) => part.trim())
     .filter(Boolean);
-}
-
-const HINTS: { test: RegExp; target: FieldTarget; separator?: string }[] = [
-  { test: /^allure[ _-]?id$/i, target: { kind: "ignore" } },
-  { test: /^(id|key|case ?id|test ?case ?id|test ?id|test ?key|external ?id|issue ?key)$/i, target: { kind: "sourceId" } },
-  { test: /^(name|title|summary|test ?case( ?name| ?title)?|case ?(name|title)|test ?(name|title))$/i, target: { kind: "name" } },
-  { test: /pre-?cond|prerequisite/i, target: { kind: "precondition", heading: "" } },
-  { test: /descr|objective|purpose/i, target: { kind: "description", heading: "" } },
-  { test: /^(tags?|labels?|keywords?)$/i, target: { kind: "tag" }, separator: "," },
-  { test: /^(links?|urls?)$/i, target: { kind: "link" }, separator: "," },
-  { test: /jira|^issues?$|requirement|^refs?$|^references?$|stor(y|ies)/i, target: { kind: "issue", integrationId: null }, separator: "," },
-  { test: /layer/i, target: { kind: "layer" } },
-  { test: /^(status|state)$/i, target: { kind: "status" } },
-  { test: /^(owner|author|created ?by|creator)$/i, target: { kind: "owner" } },
-];
-
-const STEPS_HEADER = /^(steps?|scenario|test ?steps?|actions?|step ?actions?|procedure|test ?script|step ?description)$/i;
-const EXPECTED_HEADER = /expected/i;
-const ROLE_HEADER = /^(reviewers?|testers?|assignees?|leads?|team ?leads?|qa|developers?)$/i;
-
-function roleName(header: string): string {
-  const singular = header.trim().replace(/s$/i, "");
-  return singular.charAt(0).toUpperCase() + singular.slice(1).toLowerCase();
-}
-
-function suggest(header: string, samples: string[], context: { multiRow: boolean; hasSteps: boolean; distinct: number; cases: number }): {
-  target: FieldTarget;
-  separator?: string;
-} {
-  // "created_by", "Created-By" and "Created By" are the same header.
-  const column = header.replace(/[_-]+/g, " ").replace(/\s+/g, " ").trim();
-  if (STEPS_HEADER.test(column)) {
-    return { target: { kind: "scenario" } };
-  }
-  if (EXPECTED_HEADER.test(column)) {
-    return { target: context.hasSteps && (context.multiRow || /step/i.test(column) || context.hasSteps) ? { kind: "scenarioExpected" } : { kind: "expectedResult", heading: "" } };
-  }
-  if (ROLE_HEADER.test(column)) {
-    return { target: { kind: "role", role: roleName(column) }, separator: "," };
-  }
-  for (const hint of HINTS) {
-    if (hint.test.test(column)) {
-      return { target: hint.target, separator: hint.separator };
-    }
-  }
-  const long = samples.some((v) => v.includes("\n") || v.length > 120);
-  if (long) {
-    return { target: { kind: "description", heading: header } };
-  }
-  if (samples.every((v) => /^https?:\/\//i.test(v)) && samples.length > 0) {
-    return { target: { kind: "link" } };
-  }
-  const commaLists = samples.filter((v) => v.includes(",")).length > samples.length / 2;
-  return { target: { kind: "customField", name: header }, separator: commaLists ? "," : undefined };
 }
 
 function levelsOf(paths: string[][]): SectionLevelInfo[] {
@@ -153,13 +104,12 @@ export function casePath(testCase: CsvCase, column: string | null, separator: st
  * so grouping can use the name and id columns before the user reviews the mapping.
  */
 export function analyseColumns(profile: Profile, table: CsvTable): { fieldsInfo: SourceFieldInfo[]; effective: Profile } {
-  const hasSteps = table.columns.some((c) => STEPS_HEADER.test(c.replace(/[_-]+/g, " ").trim()));
-  const firstPass = groupCases(table, { ...profile, fields: mergeSuggestedMappings(profile.fields, table.columns.map((c) => columnInfo(c, [], false, hasSteps, table.rows.length, 0)), null) });
+  const suggestions = suggestColumns(table);
   const fieldsInfo = table.columns.map((column) => {
     const samples = table.rows.map((row) => (row[column] ?? "").trim()).filter(Boolean);
-    const info = columnInfo(column, samples, firstPass.multiRow, hasSteps, firstPass.cases.length, new Set(samples).size);
     // The section path column feeds the levels, not a field of its own.
-    return column === profile.csv.pathColumn ? { ...info, suggestedTarget: { kind: "ignore" as const }, suggestedSeparator: undefined } : info;
+    const suggestion = column === profile.csv.pathColumn ? { target: { kind: "ignore" as const } } : suggestions.get(column)!;
+    return columnInfo(column, samples, suggestion);
   });
   return { fieldsInfo, effective: { ...profile, fields: mergeSuggestedMappings(profile.fields, fieldsInfo, null) } };
 }
@@ -172,10 +122,14 @@ export async function discoverCsv(profile: Profile, files: FileStore): Promise<S
   warnings.push(...grouped.warnings);
 
   // Section path: the configured column, or a detected one.
+  // Columns whose values look like paths, and columns whose header says so (e.g. TestRail's "Section Hierarchy").
   const pathCandidates = table.columns
-    .map((column) => ({ column, separator: detectPathSeparator(table.rows.map((row) => (row[column] ?? "").trim())) }))
+    .map((column) => {
+      const detected = detectPathSeparator(table.rows.map((row) => (row[column] ?? "").trim()));
+      return { column, separator: detected ?? (PATH_ONLY_HEADER.test(column) ? " > " : null) };
+    })
     .filter((c): c is { column: string; separator: string } => c.separator !== null && !effective.fields.some((m) => m.source === c.column && ["name", "sourceId", "scenario", "scenarioExpected"].includes(m.target.kind)))
-    .sort((a, b) => Number(PATH_HEADER.test(b.column)) - Number(PATH_HEADER.test(a.column)));
+    .sort((a, b) => Number(PATH_ONLY_HEADER.test(b.column)) - Number(PATH_ONLY_HEADER.test(a.column)) || Number(PATH_HEADER.test(b.column)) - Number(PATH_HEADER.test(a.column)));
   const pathColumn = profile.csv.pathColumn;
   const pathSeparator = pathColumn
     ? profile.csv.pathSeparator === "auto"
@@ -190,7 +144,8 @@ export async function discoverCsv(profile: Profile, files: FileStore): Promise<S
   const distinctPaths = [...new Map(paths.map((p) => [p.join("\u0000"), p])).values()].sort((a, b) => b.length - a.length);
 
   const scenarioColumn = columnFor(effective, "scenario");
-  const scenarioSample = scenarioColumn ? table.rows.map((row) => row[scenarioColumn] ?? "").find((v) => v.includes("\n")) ?? "" : "";
+  const scenarioValues = scenarioColumn ? table.rows.map((row) => row[scenarioColumn] ?? "").filter((v) => v.trim()) : [];
+  const scenarioSample = scenarioValues.find((v) => v.includes("\n")) ?? scenarioValues[0] ?? "";
 
   return {
     source: "csv",
@@ -226,8 +181,7 @@ export async function discoverCsv(profile: Profile, files: FileStore): Promise<S
   };
 }
 
-function columnInfo(column: string, samples: string[], multiRow: boolean, hasSteps: boolean, cases: number, distinct: number): SourceFieldInfo {
-  const suggestion = suggest(column, samples, { multiRow, hasSteps, distinct, cases });
+function columnInfo(column: string, samples: string[], suggestion: Suggestion): SourceFieldInfo {
   const separator = suggestion.separator;
   const counts = new Map<string, number>();
   for (const sample of samples) {

@@ -60,7 +60,44 @@ describe("parseSteps", () => {
   });
 });
 
+describe("real world step layouts", () => {
+  it("splits steps written with markers on one line", () => {
+    expect(view(parseSteps("Step: open the app Step: log in Step: check the page", auto))).toEqual([
+      { body: "open the app" },
+      { body: "log in" },
+      { body: "check the page" },
+    ]);
+  });
+
+  it("drops step numbering that Allure TestOps adds itself", () => {
+    expect(view(parseSteps("Step 1: Open\n\tSubstep 1.1: Type login\nStep 2: Submit", auto))).toEqual([
+      { body: "Open", steps: [{ body: "Type login" }] },
+      { body: "Submit" },
+    ]);
+  });
+
+  it("keeps numbered steps with bullet lists", () => {
+    expect(view(parseSteps("1. Open the form\n2. Change fields:\n- Date\n- Amount\n3. Save", auto))).toEqual([
+      { body: "Open the form" },
+      { body: "Change fields:\n- Date\n- Amount" },
+      { body: "Save" },
+    ]);
+  });
+});
+
 describe("expected results from a separate column", () => {
+  it("matches numbered expected results by number, not position", () => {
+    const steps = parseSteps("1. Click Add\n2. Fill fields\n3. Save", auto);
+    attachExpected(steps, parseExpectedTexts("1. A row appears\n3. Saved", auto));
+    expect(view(steps)).toEqual([{ body: "Click Add", expected: "A row appears" }, { body: "Fill fields" }, { body: "Save", expected: "Saved" }]);
+  });
+
+  it("keeps continuation lines of a numbered expected result", () => {
+    const steps = parseSteps("1. Filter\n2. Check", auto);
+    attachExpected(steps, parseExpectedTexts("2. Format accepted.\nRows shown", auto));
+    expect(view(steps)).toEqual([{ body: "Filter" }, { body: "Check", expected: "Format accepted.\nRows shown" }]);
+  });
+
   it("lines up expected results with steps", () => {
     const steps = parseSteps("1. Open\n2. Click\n3. Check", auto);
     attachExpected(steps, parseExpectedTexts("1. Opened\n2. Clicked", auto));

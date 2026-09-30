@@ -90,7 +90,7 @@ describe("CSV to Allure TestOps migration", () => {
       description: "description",
       precondition: "precondition",
       scenario: "scenario",
-      expected_result: "scenarioExpected",
+      expected_result: "expectedResult",
       tags: "tag",
       created_by: "owner",
       reviewers: "role",
@@ -98,9 +98,7 @@ describe("CSV to Allure TestOps migration", () => {
     });
 
     const target = await discoverTestOps(profile);
-    profile.fields = mergeSuggestedMappings([], discovery.fields, target).map((m) =>
-      m.source === "expected_result" ? { ...m, target: { kind: "expectedResult", heading: "" } } : m,
-    );
+    profile.fields = mergeSuggestedMappings([], discovery.fields, target);
     profile.csv.pathColumn = "folder";
     profile.structure.levels = ["Epic", "Feature", "Story"];
 
@@ -163,6 +161,33 @@ describe("CSV to Allure TestOps migration", () => {
     expect(cf(checkout, "Priority")).toEqual(["Critical"]);
     expect(cf(checkout, "Feature")).toEqual(["Cart / Checkout"]);
     expect(cf(byTag("csv:T-2"), "Priority")).toEqual(["Low"]);
+  });
+
+  it("skips records without a name and logs their line", async () => {
+    const profile = await profileFor(`id,name,scenario\nA-1,Has a name,Open\nA-2,,Open\nA-3,Also named,Click\n`, "noname");
+    const discovery = await discoverCsv(profile, files);
+    expect(discovery.warnings).toContain("1 record(s) have no name; they cannot be imported and are skipped.");
+    profile.fields = mergeSuggestedMappings([], discovery.fields, null);
+
+    const dry = await run(profile, true);
+    expect(dry.counters).toMatchObject({ total: 3, skipped: 1, failed: 0 });
+
+    const summary = await run(profile);
+    expect(summary.counters).toMatchObject({ total: 3, created: 2, skipped: 1, failed: 0 });
+    const log = await store.log(profile.id, summary.id);
+    expect(log).toContainEqual(expect.objectContaining({ level: "warn", message: "Line 3: Cannot be imported: the test case has no name.", caseId: "A-2" }));
+    expect(state.testCases.some((tc) => tc.tags.includes("csv:A-2"))).toBe(false);
+  });
+
+  it("imports nothing when no column is the test case name", async () => {
+    const profile = await profileFor(`id,title of something,scenario\nB-1,x,Open\n`, "nonamecolumn");
+    const discovery = await discoverCsv(profile, files);
+    profile.fields = mergeSuggestedMappings([], discovery.fields, null).map((m) => (m.target.kind === "name" ? { ...m, target: { kind: "ignore" } } : m));
+    const before = state.testCases.length;
+    const summary = await run(profile);
+    expect(summary.status).toBe("failed");
+    expect(summary.error).toMatch(/No column is mapped to the test case name/);
+    expect(state.testCases).toHaveLength(before);
   });
 
   it("updates an existing case given by its Allure ID", async () => {

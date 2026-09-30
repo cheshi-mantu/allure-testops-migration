@@ -1,6 +1,7 @@
 import { mapSectionPath, type FieldMapping, type PlannedCase, type PlannedStep, type Profile, type TextTarget } from "@atm/shared";
 import { convertText } from "../convert/markup.js";
 import { migrationTag } from "../convert/transform.js";
+import { CaseSkipped } from "../engine/errors.js";
 import { values, type CsvCase } from "./cases.js";
 import { casePath } from "./discovery.js";
 import { attachExpected, parseExpectedTexts, parseSteps, type StepParseOptions } from "./steps.js";
@@ -185,7 +186,11 @@ export function transformCsvCase(testCase: CsvCase, context: CsvContext): { plan
   planned.precondition = texts.precondition.join("\n\n");
   planned.expectedResult = texts.expectedResult.join("\n\n");
   if (!planned.name) {
-    throw new Error(`The case on line ${testCase.line} has no name.`);
+    // The name is the only required value: a record without one is not imported.
+    throw new CaseSkipped(`Line ${testCase.line}: Cannot be imported: the test case has no name.`);
+  }
+  if ([planned.description, planned.precondition, planned.expectedResult].some((t) => t.includes("testrail-attachment:"))) {
+    notes.push("The text refers to TestRail images; a CSV file does not contain them, so a note is left in their place.");
   }
   return { planned, linkedCaseIds: [] };
 }
