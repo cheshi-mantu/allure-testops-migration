@@ -371,7 +371,8 @@ function FieldRow({
               <CustomFieldInput
                 value={target.name}
                 placeholder="Custom field name"
-                onChange={(name) => onChange((m) => void (m.target = { kind: "customField", name: name ?? field.label }))}
+                required
+                onChange={(name) => name && onChange((m) => void (m.target = { kind: "customField", name }))}
               />
             )}
             {(target.kind === "description" || target.kind === "precondition" || target.kind === "expectedResult") && (

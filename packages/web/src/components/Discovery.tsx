@@ -1,6 +1,6 @@
 import { Alert, Autocomplete, Badge, Button, Group, Loader, Stack, Text } from "@mantine/core";
 import { IconRefresh } from "@tabler/icons-react";
-import { useEffect, useRef, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { errorText } from "../api/client";
 import { ErrorAlert } from "./Problems";
 import { useProfile } from "./ProfileContext";
@@ -90,23 +90,34 @@ export function RefreshButton() {
   );
 }
 
-/** Custom field name input suggesting existing Allure TestOps fields; unknown names are created on migration. */
+/**
+ * Custom field name input suggesting existing Allure TestOps fields; unknown names are created on migration.
+ * With `required` the input can still be emptied while typing; left empty, it gets back the name it had on focus.
+ */
 export function CustomFieldInput({
   value,
   onChange,
   placeholder = "Not migrated",
   label,
   description,
+  required = false,
 }: {
   value: string | null;
   onChange: (value: string | null) => void;
   placeholder?: string;
   label?: string;
   description?: string;
+  required?: boolean;
 }) {
   const { testops } = useProfile();
+  const [text, setText] = useState(value ?? "");
+  const onFocusValue = useRef(value);
+  useEffect(() => {
+    setText((current) => (required && current.trim() === "" ? current : (value ?? "")));
+  }, [value, required]);
   const fields = testops.data?.customFields ?? [];
-  const existing = fields.find((f) => f.name === value);
+  const shown = text.trim() === "" ? null : text;
+  const existing = fields.find((f) => f.name === shown);
   const data = [
     { group: "In this project", items: fields.filter((f) => f.inProject).map((f) => f.name) },
     { group: "Other custom fields", items: fields.filter((f) => !f.inProject).map((f) => f.name) },
@@ -117,11 +128,30 @@ export function CustomFieldInput({
       description={description}
       placeholder={placeholder}
       data={data}
-      value={value ?? ""}
-      onChange={(next) => onChange(next.trim() === "" ? null : next)}
-      rightSectionWidth={value ? 64 : undefined}
+      value={text}
+      error={required && shown === null ? "Enter a custom field name" : undefined}
+      onChange={(next) => {
+        setText(next);
+        const name = next.trim() === "" ? null : next;
+        if (name !== null || !required) {
+          onChange(name);
+        }
+      }}
+      onFocus={() => {
+        onFocusValue.current = value;
+      }}
+      onBlur={() => {
+        if (required && text.trim() === "") {
+          const restored = onFocusValue.current ?? value;
+          setText(restored ?? "");
+          if (restored !== value) {
+            onChange(restored);
+          }
+        }
+      }}
+      rightSectionWidth={shown ? 64 : undefined}
       rightSection={
-        value ? (
+        shown ? (
           existing ? (
             existing.inProject ? null : (
               <Badge size="xs" variant="light" color="gray">
