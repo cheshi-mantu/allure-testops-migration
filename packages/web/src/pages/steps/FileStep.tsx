@@ -77,7 +77,7 @@ export function FileStep() {
   const followFile = (p: typeof profile, fileName: string) => {
     const previous = files.data?.find((f) => f.id === p.csv.fileId);
     const prefix = p.options.migrationTagPrefix;
-    if (prefix === "csv" || (previous && prefix === tagPrefixFor(previous.name))) {
+    if (prefix === "" || prefix === "csv" || (previous && prefix === tagPrefixFor(previous.name))) {
       p.options.migrationTagPrefix = tagPrefixFor(fileName);
     }
   };

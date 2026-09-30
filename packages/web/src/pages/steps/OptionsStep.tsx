@@ -6,6 +6,8 @@ export function OptionsStep() {
   const { profile, update } = useProfile();
   const options = profile.options;
   const csv = profile.source === "csv";
+  const prefixMissing = options.migrationTagPrefix.trim() === "";
+  const prefixShown = prefixMissing ? "<prefix>" : options.migrationTagPrefix;
   const set = <K extends keyof MigrationOptions>(key: K, value: MigrationOptions[K]) => update((p) => void (p.options[key] = value));
 
   return (
@@ -15,16 +17,16 @@ export function OptionsStep() {
           <Title order={4}>Identification</Title>
           <TextInput
             label="Migration tag prefix"
+            withAsterisk
             description={
               csv
-                ? `Every case gets the tag "${options.migrationTagPrefix}:<case id>". Reruns find cases by this tag and update them.`
-                : `Every case gets the tag "${options.migrationTagPrefix}:<TestRail id>". Reruns find cases by this tag and update them. Keep "testrail" to continue a migration made with the previous migration tool.`
+                ? `Every case gets the tag "${prefixShown}:<case id>". Reruns find cases by this tag and update them.`
+                : `Every case gets the tag "${prefixShown}:<TestRail id>". Reruns find cases by this tag and update them. Keep "testrail" to continue a migration made with the previous migration tool.`
             }
+            placeholder={csv ? "e.g. csv-regression" : "testrail"}
             value={options.migrationTagPrefix}
-            onChange={(e) => {
-              const value = e.currentTarget.value.trim();
-              set("migrationTagPrefix", value || (csv ? "csv" : "testrail"));
-            }}
+            error={prefixMissing ? "Enter a prefix. Without it migrated cases cannot be found again, so the migration cannot start." : undefined}
+            onChange={(e) => set("migrationTagPrefix", e.currentTarget.value.trim())}
           />
           <TextInput
             label="Additional tag"

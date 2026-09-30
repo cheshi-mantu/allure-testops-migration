@@ -84,6 +84,7 @@ export const api = {
 
   runs: (id: string) => request<RunSummary[]>("GET", `/api/profiles/${id}/runs`),
   startRun: (id: string, dryRun: boolean) => request<RunSummary>("POST", `/api/profiles/${id}/runs`, { dryRun }),
+  clearRuns: (id: string) => request<void>("DELETE", `/api/profiles/${id}/runs`),
   cancelRun: (id: string) => request<{ cancelled: boolean }>("POST", `/api/profiles/${id}/runs/cancel`),
   runLog: (id: string, runId: string) => request<RunLogEntry[]>("GET", `/api/profiles/${id}/runs/${runId}/log`),
   runEventsUrl: (id: string, runId: string) => `/api/profiles/${id}/runs/${runId}/events`,

@@ -290,6 +290,18 @@ export interface RunSummary {
   errorFix?: FixLink;
   /** Problems found so far, most severe first. Missing in runs made by older versions. */
   problems?: RunProblem[];
+  /** What the run worked with. Missing in runs made by older versions. */
+  context?: RunContext;
+}
+
+/** The source, target and tag prefix of a run, to tell runs made with other settings apart. */
+export interface RunContext {
+  /** Identifies the source: the CSV file id, or the TestRail address and project. */
+  source: string;
+  /** The source for people: the file name or the TestRail project. */
+  sourceLabel: string;
+  testopsProjectId: number | null;
+  tagPrefix: string;
 }
 
 export type LogLevel = "debug" | "info" | "warn" | "error";

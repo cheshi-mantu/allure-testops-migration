@@ -53,6 +53,8 @@ interface StepDef {
   description: string;
   icon: ReactNode;
   done: (profile: Profile) => boolean;
+  /** Why the next step cannot be opened yet, if it cannot. */
+  blocked?: (profile: Profile) => string | null;
   render: () => ReactNode;
 }
 
@@ -142,7 +144,8 @@ const COMMON_STEPS: StepDef[] = [
     label: "Options",
     description: "Tags, text, attachments",
     icon: <IconSettings size={16} />,
-    done: () => true,
+    done: (p) => p.options.migrationTagPrefix.trim() !== "",
+    blocked: (p) => (p.options.migrationTagPrefix.trim() === "" ? "Enter the migration tag prefix first." : null),
     render: () => <OptionsStep />,
   },
   {
@@ -216,6 +219,7 @@ function ProfileEditor() {
   const STEPS = stepsFor(profile);
   const current = STEPS.find((s) => s.key === step) ?? STEPS[0]!;
   const index = STEPS.indexOf(current);
+  const blockedReason = current.blocked?.(profile) ?? null;
 
   const duplicate = useMutation({
     mutationFn: async () => {
@@ -318,7 +322,16 @@ function ProfileEditor() {
             <span />
           )}
           {index < STEPS.length - 1 && (
-            <Button onClick={() => navigate(`/profiles/${profile.id}/${STEPS[index + 1]!.key}`)}>{STEPS[index + 1]!.label} →</Button>
+            <Group gap="sm">
+              {blockedReason && (
+                <Text size="sm" c="red">
+                  {blockedReason}
+                </Text>
+              )}
+              <Button disabled={Boolean(blockedReason)} onClick={() => navigate(`/profiles/${profile.id}/${STEPS[index + 1]!.key}`)}>
+                {STEPS[index + 1]!.label} →
+              </Button>
+            </Group>
           )}
         </Group>
       </Grid.Col>

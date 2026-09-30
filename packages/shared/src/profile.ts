@@ -176,8 +176,8 @@ export const FieldMappingSchema = z.object({
 export type FieldMapping = z.infer<typeof FieldMappingSchema>;
 
 export const MigrationOptionsSchema = z.object({
-  /** Tag `<prefix>:<caseId>` identifies migrated cases, so reruns update instead of duplicating. */
-  migrationTagPrefix: z.string().min(1).default("testrail"),
+  /** Tag `<prefix>:<caseId>` identifies migrated cases, so reruns update instead of duplicating. Required to run; may be empty while editing. */
+  migrationTagPrefix: z.string().default("testrail"),
   /** Extra tag put on every migrated case, e.g. the migration date. */
   additionalTag: z.string().default(""),
   /** Add a link back to the source case (TestRail only). */

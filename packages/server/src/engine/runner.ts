@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import {
+  runContext,
   testRailRequestsPerMinute,
   type LogLevel,
   type PlannedCase,
@@ -51,6 +52,7 @@ export class Run {
       counters: { total: 0, processed: 0, created: 0, updated: 0, failed: 0, skipped: 0 },
       phase: "Starting",
       error: null,
+      context: runContext(profile, profile.source === "csv" ? "CSV file" : `TestRail project #${profile.testrail.scope.projectId ?? "?"}`),
     };
   }
 
@@ -200,6 +202,12 @@ export class Run {
 
   private async work() {
     const profile = this.profile;
+    if (profile.source === "csv" && profile.csv.fileId) {
+      const file = (await this.deps.files.list().catch(() => [])).find((f) => f.id === profile.csv.fileId);
+      if (file) {
+        this.summary.context!.sourceLabel = file.name;
+      }
+    }
     const log = (level: "info" | "warn", message: string, caseId?: string) => this.log(level, message, caseId);
     this.phase(profile.source === "csv" ? "Reading the CSV file" : "Connecting to TestRail");
     if (profile.source === "testrail") {
@@ -576,6 +584,9 @@ export class RunManager {
   start(profile: Profile, dryRun: boolean): RunSummary {
     if (this.active.has(profile.id)) {
       throw new Error("A migration for this profile is already running.");
+    }
+    if (!profile.options.migrationTagPrefix.trim()) {
+      throw new Error("Enter the migration tag prefix on the Options step: reruns find migrated cases by it.");
     }
     const run = new Run(profile, dryRun, this.store, this.deps);
     this.active.set(profile.id, run);

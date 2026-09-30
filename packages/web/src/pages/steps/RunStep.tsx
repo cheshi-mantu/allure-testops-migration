@@ -17,20 +17,43 @@ import {
   Title,
 } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
-import { IconDownload, IconPlayerPlay, IconPlayerStop, IconTestPipe } from "@tabler/icons-react";
+import { IconDownload, IconPlayerPlay, IconPlayerStop, IconTestPipe, IconTrash } from "@tabler/icons-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { SECRET_MASK, type Profile, type RunLogEntry, type RunSummary } from "@atm/shared";
+import { runContextChanges, SECRET_MASK, type Profile, type RunLogEntry, type RunSummary } from "@atm/shared";
 import { api, errorText } from "../../api/client";
 import { useProfile } from "../../components/ProfileContext";
 import { FixButton, ProblemList } from "../../components/Problems";
 import { RunStatusBadge } from "../../components/RunStatusBadge";
+
+/** How the run's file, project or tag prefix differ from the profile now; empty when they match or are unknown. */
+function otherSettings(run: RunSummary, profile: Profile, currentFileName: string | null): string[] {
+  const context = run.context;
+  if (!context) {
+    return [];
+  }
+  return runContextChanges(context, profile).map((change) => {
+    switch (change) {
+      case "source":
+        return profile.source === "csv"
+          ? `File "${context.sourceLabel}", the profile now uses ${currentFileName ? `"${currentFileName}"` : "another file"}.`
+          : `${context.sourceLabel}, the profile now uses TestRail project #${profile.testrail.scope.projectId ?? "?"}.`;
+      case "project":
+        return `Allure TestOps project #${context.testopsProjectId ?? "?"}, the profile now uses #${profile.testops.scope.projectId ?? "?"}.`;
+      case "tagPrefix":
+        return `Tag prefix "${context.tagPrefix}", the profile now uses ${profile.options.migrationTagPrefix ? `"${profile.options.migrationTagPrefix}"` : "none"}.`;
+    }
+  });
+}
 
 function problems(profile: Profile): string[] {
   const list: string[] = [];
   const has = (value: string) => value === SECRET_MASK || value.trim() !== "";
   if (!profile.testops.connection.endpoint || !has(profile.testops.connection.apiToken)) {
     list.push("The Allure TestOps connection is incomplete (Connections).");
+  }
+  if (!profile.options.migrationTagPrefix.trim()) {
+    list.push("Enter the migration tag prefix (Options).");
   }
   if (profile.source === "csv") {
     if (!profile.csv.fileId) {
@@ -121,10 +144,16 @@ export function RunStep() {
   const { profile, flush } = useProfile();
   const queryClient = useQueryClient();
   const runs = useQuery({ queryKey: ["runs", profile.id], queryFn: () => api.runs(profile.id), refetchInterval: 10_000 });
+  const files = useQuery({ queryKey: ["files"], queryFn: api.files, enabled: profile.source === "csv" });
+  const currentFileName = files.data?.find((f) => f.id === profile.csv.fileId)?.name ?? null;
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [confirm, setConfirm] = useState(false);
-  const selected = runs.data?.find((r) => r.id === selectedId) ?? runs.data?.[0] ?? null;
+  const [confirmClear, setConfirmClear] = useState(false);
   const active = runs.data?.find((r) => r.status === "running") ?? null;
+  const latest = runs.data?.[0] ?? null;
+  const latestOther = latest ? otherSettings(latest, profile, currentFileName) : [];
+  // A run made with another file, project or tag prefix says nothing about the current settings: show it only on request.
+  const selected = runs.data?.find((r) => r.id === selectedId) ?? active ?? (latestOther.length === 0 ? latest : null);
   const blockers = problems(profile);
   const hints = warnings(profile);
 
@@ -141,6 +170,16 @@ export function RunStep() {
     onError: (error) => notifications.show({ color: "red", message: errorText(error) }),
   });
   const cancel = useMutation({ mutationFn: () => api.cancelRun(profile.id) });
+  const clear = useMutation({
+    mutationFn: () => api.clearRuns(profile.id),
+    onSuccess: () => {
+      setSelectedId(null);
+      setConfirmClear(false);
+      void queryClient.invalidateQueries({ queryKey: ["runs", profile.id] });
+      void queryClient.invalidateQueries({ queryKey: ["profiles"] });
+    },
+    onError: (error) => notifications.show({ color: "red", message: errorText(error) }),
+  });
 
   return (
     <Stack>
@@ -196,18 +235,41 @@ export function RunStep() {
         </Group>
       </Card>
 
-      {selected && <RunDetails key={selected.id} profile={profile} run={selected} />}
+      {!selected && latest && (
+        <Alert color="gray" title="The last run used other settings">
+          <Stack gap="xs">
+            <List size="sm">
+              {latestOther.map((line) => (
+                <List.Item key={line}>{line}</List.Item>
+              ))}
+            </List>
+            <Text size="sm">Its results do not describe the current settings. Start a dry run to check them.</Text>
+            <Group>
+              <Button size="xs" variant="default" onClick={() => setSelectedId(latest.id)}>
+                Show that run
+              </Button>
+            </Group>
+          </Stack>
+        </Alert>
+      )}
+
+      {selected && <RunDetails key={selected.id} profile={profile} run={selected} other={otherSettings(selected, profile, currentFileName)} />}
 
       {(runs.data?.length ?? 0) > 0 && (
         <Card withBorder>
-          <Title order={5} mb="xs">
-            History
-          </Title>
+          <Group justify="space-between" mb="xs">
+            <Title order={5}>History</Title>
+            <Button size="xs" variant="subtle" color="red" leftSection={<IconTrash size={14} />} disabled={Boolean(active)} onClick={() => setConfirmClear(true)}>
+              Clear history
+            </Button>
+          </Group>
+          <Table.ScrollContainer minWidth={640}>
           <Table highlightOnHover verticalSpacing={6}>
             <Table.Thead>
               <Table.Tr>
                 <Table.Th>Started</Table.Th>
                 <Table.Th>Status</Table.Th>
+                <Table.Th>Settings</Table.Th>
                 <Table.Th>Cases</Table.Th>
                 <Table.Th>Created / updated / failed</Table.Th>
               </Table.Tr>
@@ -221,8 +283,34 @@ export function RunStep() {
                   onClick={() => setSelectedId(run.id)}
                 >
                   <Table.Td>{new Date(run.startedAt).toLocaleString()}</Table.Td>
-                  <Table.Td>
+                  <Table.Td miw={170}>
                     <RunStatusBadge run={run} />
+                  </Table.Td>
+                  <Table.Td maw={320}>
+                    {run.context ? (
+                      <>
+                        <Text size="sm" truncate title={run.context.sourceLabel}>
+                          {run.context.sourceLabel}
+                        </Text>
+                        <Group gap={6}>
+                          <Text size="xs" c="dimmed">
+                            project #{run.context.testopsProjectId ?? "?"} · tag prefix{" "}
+                            <Text span size="xs" className="mono">
+                              {run.context.tagPrefix}
+                            </Text>
+                          </Text>
+                          {otherSettings(run, profile, currentFileName).length > 0 && (
+                            <Badge size="xs" variant="light" color="gray">
+                              other settings
+                            </Badge>
+                          )}
+                        </Group>
+                      </>
+                    ) : (
+                      <Text size="xs" c="dimmed">
+                        not recorded
+                      </Text>
+                    )}
                   </Table.Td>
                   <Table.Td>{run.counters.total}</Table.Td>
                   <Table.Td>
@@ -232,8 +320,28 @@ export function RunStep() {
               ))}
             </Table.Tbody>
           </Table>
+          </Table.ScrollContainer>
         </Card>
       )}
+
+      <Modal opened={confirmClear} onClose={() => setConfirmClear(false)} title="Clear the run history?">
+        <Stack>
+          <Text size="sm">
+            The {runs.data?.length ?? 0} run(s) of this profile and their logs are deleted. Test cases in Allure TestOps are not touched.
+          </Text>
+          <Text size="sm" c="dimmed">
+            The logs list the cases each run created, with links. Keep them while you may still need to find or remove those cases.
+          </Text>
+          <Group justify="flex-end">
+            <Button variant="default" onClick={() => setConfirmClear(false)}>
+              Cancel
+            </Button>
+            <Button color="red" loading={clear.isPending} onClick={() => clear.mutate()}>
+              Clear history
+            </Button>
+          </Group>
+        </Stack>
+      </Modal>
 
       <Modal opened={confirm} onClose={() => setConfirm(false)} title="Start the migration?">
         <Stack>
@@ -257,7 +365,7 @@ export function RunStep() {
 
 type LogFilter = "all" | "problems" | "errors";
 
-function RunDetails({ profile, run }: { profile: Profile; run: RunSummary }) {
+function RunDetails({ profile, run, other }: { profile: Profile; run: RunSummary; other: string[] }) {
   const { entries, summary: live } = useRunStream(profile.id, run);
   const summary = live ?? run;
   const [filter, setFilter] = useState<LogFilter>("all");
@@ -270,6 +378,8 @@ function RunDetails({ profile, run }: { profile: Profile; run: RunSummary }) {
   const percent = counters.total ? Math.round((counters.processed / counters.total) * 100) : summary.status === "running" ? 0 : 100;
   const testrailBase = profile.testrail.connection.endpoint.replace(/\/?$/, "/");
   const testopsBase = profile.testops.connection.endpoint.replace(/\/?$/, "/");
+  // Links point to the project the run wrote to, which may not be the one chosen now.
+  const testopsProjectId = summary.context ? summary.context.testopsProjectId : profile.testops.scope.projectId;
 
   useEffect(() => {
     if (filter === "all" && viewport.current) {
@@ -293,6 +403,15 @@ function RunDetails({ profile, run }: { profile: Profile; run: RunSummary }) {
             {summary.finishedAt ? ` – ${new Date(summary.finishedAt).toLocaleTimeString()}` : ""}
           </Text>
         </Group>
+        {other.length > 0 && (
+          <Alert color="gray" title="This run used other settings">
+            <List size="sm">
+              {other.map((line) => (
+                <List.Item key={line}>{line}</List.Item>
+              ))}
+            </List>
+          </Alert>
+        )}
         <Progress value={percent} animated={summary.status === "running"} striped={summary.status === "running"} size="lg" />
         {summary.status === "running" && (
           <Group gap="xs">
@@ -393,11 +512,11 @@ function RunDetails({ profile, run }: { profile: Profile; run: RunSummary }) {
                   ))}
                 {entry.caseId !== undefined && " "}
                 {entry.message}
-                {entry.targetId !== undefined && profile.testops.scope.projectId && (
+                {entry.targetId !== undefined && testopsProjectId && (
                   <>
                     {" "}
                     <Anchor
-                      href={`${testopsBase}project/${profile.testops.scope.projectId}/test-cases/${entry.targetId}`}
+                      href={`${testopsBase}project/${testopsProjectId}/test-cases/${entry.targetId}`}
                       target="_blank"
                       size="xs"
                       className="mono"

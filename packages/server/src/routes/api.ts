@@ -330,6 +330,14 @@ export async function registerApi(app: FastifyInstance, deps: ApiDeps): Promise<
     }
   });
 
+  app.delete<{ Params: { id: string } }>("/api/profiles/:id/runs", async (request, reply) => {
+    if (runner.activeRun(request.params.id)) {
+      return reply.status(409).send({ message: "Stop the running migration before clearing the history." });
+    }
+    await runs.deleteProfileRuns(request.params.id);
+    return reply.status(204).send();
+  });
+
   app.post<{ Params: { id: string } }>("/api/profiles/:id/runs/cancel", async (request) => ({ cancelled: runner.cancel(request.params.id) }));
 
   app.get<{ Params: { id: string; runId: string }; Querystring: { after?: string } }>("/api/profiles/:id/runs/:runId/log", async (request) =>
