@@ -149,7 +149,10 @@ export class Run {
                 profile: this.profile,
                 service: serviceOf(error, this.profile),
               });
-        this.summary.error = explanation.detail && explanation.detail !== explanation.title ? `${explanation.title} ${explanation.detail}` : explanation.title;
+        this.summary.error =
+          explanation.detail && explanation.detail !== explanation.title
+            ? `${explanation.title} Server message: "${explanation.detail}".`
+            : explanation.title;
         this.summary.errorHint = explanation.hint;
         this.summary.errorFix = explanation.fix;
         this.summary.phase = "Failed";

@@ -60,7 +60,23 @@ Runs","1. Runs","1. Run","S2","2/24/2020 3:35 PM"
     });
   });
 
-  it("reads Russian headers and picks a name column when there is none", () => {
+  it("picks a header mentioning a name or title, skipping names of other things", () => {
+    const csv = `Key,Project Name,Author Name,Case Title EN,Notes
+K-1,Shop,ann,Login works,first note
+K-2,Shop,bob,Logout works,second note
+K-3,Shop,ann,Search works,third note
+`;
+    const result = suggested(csv);
+    expect(result["Case Title EN"]).toBe("name");
+    expect(Object.entries(result).filter(([, kind]) => kind === "name")).toHaveLength(1);
+  });
+
+  it("finds a Russian name header by substring", () => {
+    const csv = `Номер;Название проверки;Комментарий\n1;Вход;а\n2;Выход;б\n3;Поиск;в\n`;
+    expect(suggested(csv)["Название проверки"]).toBe("name");
+  });
+
+  it("reads Russian headers and does not guess a name column when no header names one", () => {
     const csv = `﻿ID;Feature;Story;Предусловия;Шаги;ОР;Тип теста;Epic\r
 1;Вход;Вход по паролю;Открыт сайт;1. Ввести логин и пароль;1. Вход выполнен;positive;Портал\r
 2;Страница;Выход;Выполнен вход;"1. Нажать аватар
@@ -71,7 +87,7 @@ Runs","1. Runs","1. Run","S2","2/24/2020 3:35 PM"
     expect(suggested(csv)).toEqual({
       ID: "sourceId",
       Feature: "customField",
-      Story: "name",
+      Story: "customField",
       Предусловия: "precondition",
       Шаги: "scenario",
       ОР: "scenarioExpected",

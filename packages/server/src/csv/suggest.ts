@@ -35,6 +35,10 @@ const H = {
   allureId: /^allure ?id$/,
   id: /^(id|key|№|#|no|number|case ?id|test ?case ?id|test ?id|test ?key|external ?id|issue ?key|ид|идентификатор|номер|код|№ п\/п)$/,
   name: /^(name|title|summary|test ?case( ?name| ?title)?|case ?(name|title)|test ?(name|title)|название|наименование|заголовок|имя|название (теста|тест ?кейса|кейса)|тест ?кейс)$/,
+  /** Any header that mentions a name or title, when none is exactly one. */
+  nameLoose: /name|title|назв|наимен|заголов|имя/,
+  /** Names of other things than the case. */
+  notName: /user|file|author|owner|creator|project|section|suite|folder|module|component|host|domain|пользовател|файл|автор|проект|раздел|модул|компонент/,
   precondition: /pre ?cond|prerequisit|предуслови|условия/,
   description: /descr|objective|purpose|описание|цель/,
   steps: /^(steps?|scenario|test ?steps?|actions?|step ?actions?|procedure|test ?script|step ?description|шаги|шаг|сценарий|действия|шаги воспроизведения|шаги теста)$/,
@@ -182,7 +186,6 @@ export function suggestColumns(table: CsvTable): Map<string, Suggestion> {
     result.set(f.column, byHeader(f) ?? byValues(f));
   }
   const kind = (column: string) => result.get(column)!.target.kind;
-  const factsOf = (column: string) => all.find((f) => f.column === column)!;
 
   // Id: prefer a plain id column; an Allure id is also a stable id when nothing else is.
   const ids = all.filter((f) => kind(f.column) === "sourceId");
@@ -230,14 +233,25 @@ export function suggestColumns(table: CsvTable): Map<string, Suggestion> {
     result.set(extra.column, { target: { kind: "expectedResult", heading: extra.column.trim() } });
   }
 
-  // Name: without a name header, the short column with the most distinct values names the case.
+  // Name: without a name header, a header mentioning a name or title ("Case Title EN", "Название проверки").
+  // Nothing is guessed from the values: the user picks the column, the Columns step asks for it.
   if (!all.some((f) => kind(f.column) === "name")) {
-    const candidates = all.filter((f) => {
-      const k = kind(f.column);
-      return (k === "customField" || k === "description") && f.multiline === 0 && f.averageLength <= 150 && f.distinct > 1 && !H.meta.test(f.header);
-    });
-    const best = candidates.sort((a, b) => b.distinct - a.distinct)[0];
-    if (best && best.distinct >= Math.max(2, factsOf(best.column).samples.length * 0.3)) {
+    const testWords = /case|test|тест|кейс/;
+    const best = all
+      .filter((f) => {
+        const k = kind(f.column);
+        return (
+          H.nameLoose.test(f.header) &&
+          !H.notName.test(f.header) &&
+          (k === "customField" || k === "description" || k === "ignore") &&
+          f.samples.length > 0 &&
+          f.multiline === 0 &&
+          f.averageLength <= 150 &&
+          !H.meta.test(f.header)
+        );
+      })
+      .sort((a, b) => Number(testWords.test(b.header)) - Number(testWords.test(a.header)) || b.distinct - a.distinct)[0];
+    if (best) {
       result.set(best.column, { target: { kind: "name" } });
     }
   }

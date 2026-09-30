@@ -560,7 +560,7 @@ function ValueTable({
     <Table mt="sm" verticalSpacing={4}>
       <Table.Thead>
         <Table.Tr>
-          <Table.Th>TestRail value</Table.Th>
+          <Table.Th>{profile.source === "csv" ? "CSV value" : "TestRail value"}</Table.Th>
           <Table.Th w={90}>In sample</Table.Th>
           <Table.Th w="45%">Allure TestOps value</Table.Th>
           <Table.Th w={90}>Skip</Table.Th>

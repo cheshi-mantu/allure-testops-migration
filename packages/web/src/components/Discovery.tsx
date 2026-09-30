@@ -62,7 +62,7 @@ export function DiscoveryGate({ children, needTestOps = true }: { children: Reac
   return (
     <Stack>
       {warnings.length > 0 && (
-        <Alert color="yellow" title="Some data could not be read">
+        <Alert color="yellow" title="Worth checking">
           {warnings.map((warning) => (
             <Text size="sm" key={warning}>
               {warning}
