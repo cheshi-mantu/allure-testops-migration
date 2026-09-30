@@ -1,5 +1,5 @@
 import type { TestOpsConnection } from "@atm/shared";
-import { HttpClient, HttpError, type Query } from "../http/httpClient.js";
+import { HttpClient, HttpError, type Query, type RetryInfo } from "../http/httpClient.js";
 
 /** Allure TestOps REST payloads, only the parts the migration uses. */
 
@@ -88,13 +88,14 @@ const PAGE_SIZE = 100;
 export class TestOpsClient {
   readonly http: HttpClient;
 
-  constructor(connection: TestOpsConnection, http?: HttpClient) {
+  constructor(connection: TestOpsConnection, http?: HttpClient, onRetry?: (info: RetryInfo) => void) {
     this.http =
       http ??
       new HttpClient({
         baseUrl: connection.endpoint,
         insecureTls: connection.insecureTls,
         headers: { Authorization: `Api-Token ${connection.apiToken}` },
+        onRetry,
       });
   }
 
@@ -158,8 +159,25 @@ export class TestOpsClient {
     return page?.content ?? [];
   }
 
-  customFieldValues(customFieldId: number): Promise<ToNamed[]> {
-    return this.all<ToNamed>("api/rs/cfv", { customFieldId });
+  /**
+   * Values of a custom field matching a query, lightweight (no test case counts). Global fields on
+   * big instances have many thousands of values, so callers look values up instead of listing them all.
+   */
+  async suggestCustomFieldValues(customFieldId: number, query = "", size = 100, projectId?: number): Promise<ToNamed[]> {
+    const page = await this.http.get<ToPage<ToNamed> | ToNamed[]>("api/rs/cfv/suggest", { customFieldId, query, projectId, page: 0, size });
+    return Array.isArray(page) ? page : (page?.content ?? []);
+  }
+
+  /** Which of the given values already exist for a custom field. */
+  async existingCustomFieldValues(customFieldId: number, values: string[]): Promise<Set<string>> {
+    const found = new Set<string>();
+    for (const value of values) {
+      const matches = await this.suggestCustomFieldValues(customFieldId, value, 50);
+      if (matches.some((m) => m.name === value)) {
+        found.add(value);
+      }
+    }
+    return found;
   }
 
   createCustomField(name: string): Promise<ToCustomField> {

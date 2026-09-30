@@ -1,4 +1,5 @@
-import { mapSectionPath, type FieldMapping, type PlannedCase, type PlannedStep, type Profile, type TextTarget } from "@atm/shared";
+import { mapSectionPath, type FieldMapping, type PlannedCase, type PlannedNote, type PlannedStep, type Profile, type TextTarget } from "@atm/shared";
+import { note } from "../convert/notes.js";
 import { convertText } from "../convert/markup.js";
 import { migrationTag } from "../convert/transform.js";
 import { CaseSkipped } from "../engine/errors.js";
@@ -44,7 +45,7 @@ function caseText(testCase: CsvCase, column: string): string {
 export function transformCsvCase(testCase: CsvCase, context: CsvContext): { planned: PlannedCase; linkedCaseIds: string[] } {
   const { profile } = context;
   const options = profile.options;
-  const notes: string[] = [];
+  const notes: PlannedNote[] = [];
   const planned: PlannedCase = {
     sourceId: testCase.key,
     sourceUrl: null,
@@ -105,7 +106,13 @@ export function transformCsvCase(testCase: CsvCase, context: CsvContext): { plan
           if (Number.isInteger(id) && id > 0) {
             planned.allureId = id;
           } else {
-            notes.push(`"${raw}" is not an Allure TestOps id.`);
+            notes.push({
+              code: "allure-id-invalid",
+              text: `"${raw}" in ${mapping.source} is not an Allure TestOps id, so a new case is created instead of updating one.`,
+              summary: `Values of ${mapping.source} that are not Allure TestOps ids are ignored.`,
+              hint: "Allure ids are numbers. If the column holds ids of another system, map it to \"Case id (for reruns)\" instead.",
+              fix: { step: "fields", field: mapping.source },
+            });
           }
         }
         break;
@@ -132,7 +139,13 @@ export function transformCsvCase(testCase: CsvCase, context: CsvContext): { plan
       case "role":
         if (!target.role) {
           if (values(testCase, mapping.source).length > 0) {
-            notes.push(`Choose an Allure TestOps role for the column "${mapping.source}".`);
+            notes.push({
+              code: "role-not-chosen",
+              text: `Members from ${mapping.source} are skipped: no Allure TestOps role is chosen.`,
+              summary: `Members from ${mapping.source} are skipped: no Allure TestOps role is chosen.`,
+              hint: "Choose the role, e.g. Reviewer, for this column. Roles are defined in Allure TestOps (Administration, Roles).",
+              fix: { step: "fields", field: mapping.source },
+            });
           }
           break;
         }
@@ -147,7 +160,7 @@ export function transformCsvCase(testCase: CsvCase, context: CsvContext): { plan
           if (isUrl(value)) {
             planned.links.push({ name: value, url: value });
           } else {
-            notes.push(`"${value}" from ${mapping.source} is not a URL and cannot become a link.`);
+            notes.push(note.linkNotUrl(value, mapping.source));
           }
         }
         break;
@@ -156,7 +169,7 @@ export function transformCsvCase(testCase: CsvCase, context: CsvContext): { plan
           planned.issues.push({ key, integrationId: target.integrationId });
         }
         if (target.integrationId === null && planned.issues.length > 0) {
-          notes.push("Issues need an issue tracker integration; choose one in the field mapping.");
+          notes.push(note.issueWithoutIntegration(mapping.source));
         }
         break;
       case "description":
@@ -180,17 +193,34 @@ export function transformCsvCase(testCase: CsvCase, context: CsvContext): { plan
 
   planned.scenario = scenario(testCase, scenarioMapping?.source ?? null, expectedMapping?.source ?? null, stepOptions, context.multiRow);
   if (!scenarioMapping && expectedMapping && planned.scenario.length === 0) {
-    notes.push("Expected results are mapped to steps, but no column is mapped to the scenario.");
+    notes.push({
+      code: "expected-without-scenario",
+      text: `Expected results from ${expectedMapping!.source} are lost: no column is mapped to the scenario.`,
+      summary: `Expected results from ${expectedMapping!.source} are lost: no column is mapped to the scenario.`,
+      hint: "Map the column with the steps to \"Scenario (steps)\", or map the expected results to the case's expected result.",
+      fix: { step: "fields", field: expectedMapping!.source },
+    });
   }
   planned.description = texts.description.join("\n\n");
   planned.precondition = texts.precondition.join("\n\n");
   planned.expectedResult = texts.expectedResult.join("\n\n");
   if (!planned.name) {
     // The name is the only required value: a record without one is not imported.
-    throw new CaseSkipped(`Line ${testCase.line}: Cannot be imported: the test case has no name.`);
+    const nameColumn = profile.fields.find((m) => m.target.kind === "name")?.source;
+    throw new CaseSkipped(`Line ${testCase.line}: Cannot be imported: the test case has no name.`, {
+      code: "no-name",
+      text: `Line ${testCase.line} has no name in ${nameColumn ?? "the name column"}.`,
+      summary: `Records with an empty ${nameColumn ?? "name"} cannot be imported.`,
+      hint: `The name is the only required value. Fill it in for these records in the file and upload the file again, or map a column that is always filled to the test case name.`,
+      fix: { step: "fields", field: nameColumn },
+    });
   }
   if ([planned.description, planned.precondition, planned.expectedResult].some((t) => t.includes("testrail-attachment:"))) {
-    notes.push("The text refers to TestRail images; a CSV file does not contain them, so a note is left in their place.");
+    notes.push({
+      code: "csv-testrail-images",
+      text: "The text refers to TestRail images, which a CSV file does not contain; a note is left in their place.",
+      hint: "To keep the images, migrate this project directly from TestRail instead of from its CSV export.",
+    });
   }
   return { planned, linkedCaseIds: [] };
 }

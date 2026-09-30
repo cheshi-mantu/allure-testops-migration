@@ -5,6 +5,7 @@ import { useState, type ReactNode } from "react";
 import type { PlannedAttachment, PlannedStep } from "@atm/shared";
 import { api, errorText } from "../../api/client";
 import { DiscoveryGate } from "../../components/Discovery";
+import { ErrorAlert, NoteList } from "../../components/Problems";
 import { useProfile } from "../../components/ProfileContext";
 
 export function PreviewStep() {
@@ -125,16 +126,12 @@ function Preview() {
           Preview
         </Button>
       </Group>
-      {preview.error && <Alert color="red">{errorText(preview.error)}</Alert>}
+      {preview.error && <ErrorAlert error={preview.error} />}
       {planned && (
         <Stack>
           {planned.notes.length > 0 && (
             <Alert color="yellow" icon={<IconAlertTriangle size={16} />} title="Worth checking">
-              {planned.notes.map((note) => (
-                <Text size="sm" key={note}>
-                  {note}
-                </Text>
-              ))}
+              <NoteList notes={planned.notes} />
             </Alert>
           )}
           <Card withBorder>

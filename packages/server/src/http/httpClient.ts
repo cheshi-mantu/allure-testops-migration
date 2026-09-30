@@ -24,8 +24,19 @@ export interface HttpClientOptions {
   timeoutMs?: number;
   /** Every attempt, including retries, waits for a slot here. */
   rateLimiter?: RateLimiter;
+  /** Called before a retry, so long waits are visible in the run log. */
+  onRetry?: (info: RetryInfo) => void;
   /** Test seam. */
   sleep?: (ms: number) => Promise<void>;
+}
+
+export interface RetryInfo {
+  /** URL without credentials. */
+  url: string;
+  attempt: number;
+  of: number;
+  reason: string;
+  delayMs: number;
 }
 
 export type Query = Record<string, string | number | boolean | undefined | null>;
@@ -45,6 +56,7 @@ export function withTrailingSlash(url: string): string {
 export class HttpClient {
   readonly baseUrl: string;
   readonly rateLimiter: RateLimiter | undefined;
+  private readonly onRetry: ((info: RetryInfo) => void) | undefined;
   private readonly headers: Record<string, string>;
   private readonly dispatcher: Dispatcher | undefined;
   private readonly retries: number;
@@ -59,6 +71,7 @@ export class HttpClient {
     this.timeoutMs = options.timeoutMs ?? 120_000;
     this.sleep = options.sleep ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms)));
     this.rateLimiter = options.rateLimiter;
+    this.onRetry = options.onRetry;
   }
 
   /** `path` is appended to the base URL as is, so TestRail style `index.php?/api/v2/...` paths work. */
@@ -137,7 +150,9 @@ export class HttpClient {
         }
       } catch (error) {
         if (attempt < this.retries) {
-          await this.sleep(backoff(attempt));
+          const delay = backoff(attempt);
+          this.onRetry?.({ url: describe(url), attempt: attempt + 1, of: this.retries, reason: networkReason(error), delayMs: delay });
+          await this.sleep(delay);
           attempt += 1;
           continue;
         }
@@ -153,6 +168,13 @@ export class HttpClient {
           // The server counts requests for everyone using this limiter: hold them all.
           this.rateLimiter?.pauseFor(delay);
         }
+        this.onRetry?.({
+          url: describe(url),
+          attempt: attempt + 1,
+          of: this.retries,
+          reason: response.status === 429 ? "rate limited (429)" : `server answered ${response.status}`,
+          delayMs: delay,
+        });
         await this.sleep(delay);
         attempt += 1;
         continue;

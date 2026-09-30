@@ -25,6 +25,8 @@ import { discoverTestRail, loadTestRailContext } from "../testrail/discovery.js"
 import { groupCases } from "../csv/cases.js";
 import { analyseColumns, discoverCsv, loadCsv } from "../csv/discovery.js";
 import { CaseSkipped } from "../engine/errors.js";
+import { explain, KnownProblem, OperationFailed, serviceOf } from "../engine/problems.js";
+import { HttpError } from "../http/httpClient.js";
 import { prepareSource } from "../engine/sources.js";
 import type { FileStore } from "../storage/fileStore.js";
 import { checkTestOps, checkTestRail } from "./checks.js";
@@ -51,16 +53,35 @@ export async function registerApi(app: FastifyInstance, deps: ApiDeps): Promise<
     done(null, body),
   );
 
-  app.setErrorHandler((error, _request, reply) => {
+  app.setErrorHandler(async (error, request, reply) => {
     if (error instanceof NotFound) {
       return reply.status(404).send({ message: error.message });
     }
     if (error instanceof z.ZodError) {
       return reply.status(400).send({ message: "Invalid data", issues: error.issues });
     }
+    if (error instanceof KnownProblem) {
+      const { title, hint, fix } = error.explanation;
+      return reply.status(422).send({ message: title, hint, fix });
+    }
+    if (error instanceof CaseSkipped) {
+      return reply.status(422).send({ message: error.message, hint: error.note.hint, fix: error.note.fix });
+    }
     const status = (error as { statusCode?: number }).statusCode;
     if (status && status < 500) {
       return reply.status(status).send({ message: (error as Error).message });
+    }
+    if (error instanceof HttpError || error instanceof OperationFailed) {
+      // A remote system refused: say which one, why, and where to fix it.
+      const params = request.params as { id?: string } | undefined;
+      const profile = params?.id ? await profiles.get(params.id).catch(() => null) : null;
+      if (profile) {
+        const explanation = explain(error, error instanceof OperationFailed ? error.operation : "read the project", {
+          profile,
+          service: serviceOf(error, profile),
+        });
+        return reply.status(502).send({ message: explanation.title, hint: explanation.hint, fix: explanation.fix, detail: explanation.detail });
+      }
     }
     app.log.error(error);
     // Errors from remote systems are safe to show: they never contain credentials.
@@ -236,7 +257,9 @@ export async function registerApi(app: FastifyInstance, deps: ApiDeps): Promise<
     if (!field) {
       return [];
     }
-    return (await client.customFieldValues(field.id)).map((value) => value.name).sort((a, b) => a.localeCompare(b));
+    // The first values are enough to pick from; the input also accepts any typed value.
+    const values = await client.suggestCustomFieldValues(field.id, "", 500, profile.testops.scope.projectId ?? undefined);
+    return values.map((value) => value.name).sort((a, b) => a.localeCompare(b));
   });
 
   app.post<{ Params: { id: string } }>("/api/profiles/:id/preview", async (request): Promise<PlannedCase & { linkedCaseIds: string[] }> => {
@@ -272,7 +295,12 @@ export async function registerApi(app: FastifyInstance, deps: ApiDeps): Promise<
       sections: context.sections,
     });
     if (!context.sections.has(testCase.suite_id)) {
-      planned.notes.push("This case belongs to a suite that is not selected for migration.");
+      planned.notes.push({
+        code: "suite-not-selected",
+        text: "This case belongs to a suite that is not selected for migration.",
+        hint: "Add its suite on the Projects step if the case should be migrated.",
+        fix: { step: "scope" },
+      });
     }
     for (const step of planned.scenario) {
       if (step.type === "shared") {
@@ -307,6 +335,42 @@ export async function registerApi(app: FastifyInstance, deps: ApiDeps): Promise<
   app.get<{ Params: { id: string; runId: string }; Querystring: { after?: string } }>("/api/profiles/:id/runs/:runId/log", async (request) =>
     runs.log(request.params.id, request.params.runId, Number(request.query.after ?? 0)),
   );
+
+  /** The whole run as text: summary, problems with their fixes, then every log line. For support tickets. */
+  app.get<{ Params: { id: string; runId: string } }>("/api/profiles/:id/runs/:runId/log.txt", async (request, reply) => {
+    const { id, runId } = request.params;
+    const profile = await load(id);
+    const summary = runner.isActive(id, runId) ? runner.activeRun(id)!.summary : await runs.get(id, runId);
+    if (!summary) {
+      throw new NotFound("Run not found");
+    }
+    const lines: string[] = [
+      `Allure TestOps migration: ${summary.dryRun ? "dry run" : "migration"} ${summary.id}`,
+      `Profile: ${profile.name} (source: ${profile.source})`,
+      `Status: ${summary.status}, started ${summary.startedAt}${summary.finishedAt ? `, finished ${summary.finishedAt}` : ""}`,
+      `Counters: ${JSON.stringify(summary.counters)}`,
+    ];
+    if (summary.error) {
+      lines.push("", `Error: ${summary.error}`, `How to fix: ${summary.errorHint ?? "-"}`);
+    }
+    for (const problem of summary.problems ?? []) {
+      lines.push(
+        "",
+        `[${problem.level}] ${problem.title} (${problem.count} time(s))`,
+        `  How to fix: ${problem.hint}`,
+        ...(problem.detail ? [`  Server message: ${problem.detail}`] : []),
+        ...(problem.cases.length ? [`  Affected: ${problem.cases.join(", ")}`] : []),
+      );
+    }
+    lines.push("", "Log:");
+    for (const entry of await runs.log(id, runId, 0, Number.MAX_SAFE_INTEGER)) {
+      lines.push(`${entry.time} ${entry.level.toUpperCase().padEnd(5)} ${entry.caseId ? `[${entry.caseId}] ` : ""}${entry.message}`);
+    }
+    return reply
+      .header("Content-Type", "text/plain; charset=utf-8")
+      .header("Content-Disposition", `attachment; filename="migration-${summary.id}.log"`)
+      .send(`${lines.join("\n")}\n`);
+  });
 
   app.get<{ Params: { id: string; runId: string } }>("/api/profiles/:id/runs/:runId/events", async (request, reply) => {
     const { id, runId } = request.params;

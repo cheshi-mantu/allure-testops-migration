@@ -20,10 +20,14 @@ export interface SharedStepContent {
 export interface SourceAssets {
   attachments(caseKey: string | null): CaseAttachments;
   sharedStep(id: number): Promise<SharedStepContent>;
+  /** How to fix attachment downloads that fail. */
+  attachmentHint?: string;
 }
 
 export function testRailAssets(client: TestRailClient, profile: Profile): SourceAssets {
   return {
+    attachmentHint:
+      "Inline images of some TestRail versions are only served to a logged-in browser. Copy the tr_session cookie from a browser logged in to TestRail into \"Session cookie\" (Connections, advanced settings) and run again; attachments already migrated are not uploaded twice.",
     attachments: (caseKey) => new AttachmentSource(client, caseKey === null ? null : Number(caseKey)),
     sharedStep: async (id) => {
       const shared = await client.getSharedStep(id);

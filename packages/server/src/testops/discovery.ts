@@ -1,3 +1,4 @@
+import { KnownProblem } from "../engine/problems.js";
 import type { Profile, TestOpsDiscovery } from "@atm/shared";
 import { TestOpsClient } from "./client.js";
 
@@ -8,7 +9,12 @@ function describeError(error: unknown): string {
 export function requireTestOpsProject(profile: Profile): number {
   const projectId = profile.testops.scope.projectId;
   if (!projectId) {
-    throw new Error("Choose an Allure TestOps project first.");
+    throw new KnownProblem({
+      key: "no-testops-project",
+      title: "No Allure TestOps project is chosen.",
+      hint: "Choose the project the cases are migrated to.",
+      fix: { step: "scope" },
+    });
   }
   return projectId;
 }

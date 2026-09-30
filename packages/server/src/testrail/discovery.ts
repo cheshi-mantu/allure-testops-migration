@@ -1,3 +1,4 @@
+import { KnownProblem } from "../engine/problems.js";
 import type { Profile, SuiteStructure, TestRailDiscovery } from "@atm/shared";
 import { TestRailClient } from "./client.js";
 import { collectStats, FieldCatalog } from "./fields.js";
@@ -21,7 +22,12 @@ export interface TestRailProjectContext {
 function requireProject(profile: Profile): number {
   const projectId = profile.testrail.scope.projectId;
   if (!projectId) {
-    throw new Error("Choose a TestRail project first.");
+    throw new KnownProblem({
+      key: "no-testrail-project",
+      title: "No TestRail project is chosen.",
+      hint: "Choose the TestRail project to migrate from.",
+      fix: { step: "scope" },
+    });
   }
   return projectId;
 }

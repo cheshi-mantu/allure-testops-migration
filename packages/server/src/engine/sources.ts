@@ -4,14 +4,23 @@ import { detectPathSeparator, loadCsv } from "../csv/discovery.js";
 import { transformCsvCase } from "../csv/transform.js";
 import { transformCase, type SourceContext } from "../convert/transform.js";
 import type { FileStore } from "../storage/fileStore.js";
-import type { TestRailClient } from "../testrail/client.js";
+import type { RetryInfo } from "../http/httpClient.js";
+import { TestRailClient } from "../testrail/client.js";
 import { loadTestRailContext } from "../testrail/discovery.js";
 import type { TrCase } from "../testrail/types.js";
 import { noAssets, testRailAssets, type SourceAssets } from "./assets.js";
+import { KnownProblem } from "./problems.js";
 
 export interface SourceCase {
   key: string;
   title: string;
+  /** CSV: 1-based line of the first row in the file. */
+  line?: number;
+}
+
+/** "Line 12" for CSV records, "C123" for TestRail cases: how a person finds the record in the source. */
+export function caseLabel(testCase: SourceCase): string {
+  return testCase.line !== undefined ? `Line ${testCase.line}` : `C${testCase.key}`;
 }
 
 export interface Transformed {
@@ -35,14 +44,14 @@ export interface SourceDeps {
   files: FileStore;
 }
 
-export async function prepareSource(profile: Profile, deps: SourceDeps, log: Log): Promise<PreparedSource> {
-  return profile.source === "csv" ? prepareCsv(profile, deps, log) : prepareTestRail(profile, log);
+export async function prepareSource(profile: Profile, deps: SourceDeps, log: Log, onRetry?: (info: RetryInfo) => void): Promise<PreparedSource> {
+  return profile.source === "csv" ? prepareCsv(profile, deps, log) : prepareTestRail(profile, log, onRetry);
 }
 
 type TrSourceCase = SourceCase & { raw: TrCase };
 
-async function prepareTestRail(profile: Profile, log: Log): Promise<PreparedSource<TrSourceCase>> {
-  const trContext = await loadTestRailContext(profile);
+async function prepareTestRail(profile: Profile, log: Log, onRetry?: (info: RetryInfo) => void): Promise<PreparedSource<TrSourceCase>> {
+  const trContext = await loadTestRailContext(profile, new TestRailClient(profile.testrail.connection, undefined, onRetry));
   trContext.warnings.forEach((warning) => log("warn", warning));
   const context: SourceContext = {
     catalog: trContext.catalog,
@@ -90,7 +99,12 @@ type CsvSourceCase = SourceCase & { raw: CsvCase };
 
 async function prepareCsv(profile: Profile, deps: SourceDeps, log: Log): Promise<PreparedSource<CsvSourceCase>> {
   if (!profile.fields.some((m) => m.target.kind === "name")) {
-    throw new Error("No column is mapped to the test case name. Map one on the Columns step: nothing is imported without a name.");
+    throw new KnownProblem({
+      key: "no-name-column",
+      title: "No column is mapped to the test case name, so nothing can be imported.",
+      hint: "The name is the only required value. On the Columns step, map the column that holds the test case names to \"Test case name\".",
+      fix: { step: "fields" },
+    });
   }
   const { table, fileName } = await loadCsv(profile, deps.files);
   table.warnings.forEach((warning) => log("warn", warning));
@@ -113,7 +127,7 @@ async function prepareCsv(profile: Profile, deps: SourceDeps, log: Log): Promise
     testrail: null,
     transform: (testCase) => transformCsvCase(testCase.raw, context),
     readCases: async () => {
-      const cases = grouped.cases.map((raw) => ({ key: raw.key, title: raw.name || `line ${raw.line}`, raw }));
+      const cases = grouped.cases.map((raw) => ({ key: raw.key, title: raw.name || `line ${raw.line}`, line: raw.line, raw }));
       // A trial run on a few cases, chosen by id or name.
       const only = new Set(profile.csv.onlyCases.map((v) => v.trim().toLowerCase()).filter(Boolean));
       return only.size > 0 ? cases.filter((c) => only.has(c.key.toLowerCase()) || only.has(c.title.toLowerCase())) : cases;

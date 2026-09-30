@@ -52,6 +52,10 @@ export interface TestOpsMockState {
 
 export interface TestOpsMockOptions {
   apiToken?: string;
+  /** Delay every answer, to try progress reporting against a slow instance. */
+  latencyMs?: number;
+  /** Custom field values the fake refuses with 400, like a field locked to a list of values. */
+  rejectedCustomFieldValues?: string[];
 }
 
 function pageOf<T>(items: T[], request: FastifyRequest) {
@@ -110,6 +114,9 @@ export function createTestOpsMock(options: TestOpsMockOptions = {}): { app: Fast
   app.addHook("onRequest", async (request, reply) => {
     if (request.url.startsWith("/__state")) {
       return;
+    }
+    if (options.latencyMs) {
+      await new Promise((resolve) => setTimeout(resolve, options.latencyMs));
     }
     if (request.headers.authorization !== `Api-Token ${token}`) {
       return reply.status(401).send({ message: "Unauthorized" });
@@ -185,6 +192,13 @@ export function createTestOpsMock(options: TestOpsMockOptions = {}): { app: Fast
     state.projectCustomFields[projectId] = [...new Set([...(state.projectCustomFields[projectId] ?? []), ...ids])];
     return {};
   });
+  app.get("/api/rs/cfv/suggest", async (request) => {
+    const { customFieldId, query } = request.query as { customFieldId: string; query?: string };
+    const fieldId = Number(customFieldId);
+    const needle = (query ?? "").toLowerCase();
+    const matches = (state.customFieldValues[fieldId] ?? []).filter((name) => name.toLowerCase().includes(needle));
+    return pageOf(matches.map((name, index) => ({ id: fieldId * 1000 + index, name })), request);
+  });
   app.get("/api/rs/cfv", async (request) => {
     const fieldId = Number((request.query as { customFieldId: string }).customFieldId);
     return pageOf((state.customFieldValues[fieldId] ?? []).map((name, index) => ({ id: fieldId * 1000 + index, name })), request);
@@ -249,8 +263,12 @@ export function createTestOpsMock(options: TestOpsMockOptions = {}): { app: Fast
     return tc.tags.map((name) => ({ name }));
   });
   app.get("/api/rs/testcase/:id/cfv", async (request) => testCase(request).cfv);
-  app.post("/api/rs/testcase/:id/cfv", async (request) => {
+  app.post("/api/rs/testcase/:id/cfv", async (request, reply) => {
     const tc = testCase(request);
+    const rejected = (request.body as TestCase["cfv"]).find((v) => options.rejectedCustomFieldValues?.includes(v.name));
+    if (rejected) {
+      return reply.status(400).send({ message: `Custom field value [${rejected.name}] is not allowed for this project` });
+    }
     tc.cfv = request.body as TestCase["cfv"];
     for (const value of tc.cfv) {
       const values = (state.customFieldValues[value.customField.id] ??= []);

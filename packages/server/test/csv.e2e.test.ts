@@ -190,6 +190,66 @@ describe("CSV to Allure TestOps migration", () => {
     expect(state.testCases).toHaveLength(before);
   });
 
+  it("says a cancelled run was cancelled, and where", async () => {
+    const profile = await profileFor(MULTI_ROW, "cancel");
+    const discovery = await discoverCsv(profile, files);
+    profile.fields = mergeSuggestedMappings([], discovery.fields, null);
+    const started = runner.start(profile, true);
+    runner.cancel(profile.id);
+    while (runner.isActive(profile.id, started.id)) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    const summary = (await store.get(profile.id, started.id))!;
+    const log = await store.log(profile.id, started.id);
+    expect(summary.status).toBe("cancelled");
+    expect(log.at(-1)?.message).toMatch(/^Dry run cancelled during ".+": \d+ of \d+ case\(s\) converted/);
+    expect(log.some((e) => e.message.startsWith("Dry run finished"))).toBe(false);
+  });
+
+  it("lists problems with the records they affect and where to fix them", async () => {
+    const profile = await profileFor(`id,name,owner,status,priority\nP-1,One,ghost,Weird,High\nP-2,Two,ghost,Draft,Low\nP-3,Three,jane,Weird,High\n`, "problems");
+    const discovery = await discoverCsv(profile, files);
+    profile.fields = mergeSuggestedMappings([], discovery.fields, null);
+
+    const dry = await run(profile, true);
+    const dryProblems = Object.fromEntries((dry.problems ?? []).map((p) => [p.key, p]));
+    expect(dryProblems["user:ghost"]).toMatchObject({ code: "user-missing", count: 2, cases: ["Line 2", "Line 3"], fix: { step: "fields", field: "owner" } });
+    expect(dryProblems["status:Weird"]).toMatchObject({ code: "status-missing", count: 2, cases: ["Line 2", "Line 4"], fix: { step: "fields", field: "status" } });
+
+    const summary = await run(profile);
+    expect(summary.counters).toMatchObject({ created: 3, failed: 0 });
+    const problems = Object.fromEntries((summary.problems ?? []).map((p) => [p.key, p]));
+    expect(problems["user:ghost"]?.cases).toEqual(["Line 2", "Line 3"]);
+    expect(problems["status:Weird"]?.hint).toMatch(/value mapping of the status field/);
+    // A warning is logged once, the problem list counts the rest.
+    const log = await store.log(profile.id, summary.id);
+    expect(log.filter((e) => e.problem === "user:ghost")).toHaveLength(1);
+  });
+
+  it("explains a case Allure TestOps refused, with the server message", async () => {
+    const strict = createTestOpsMock({ rejectedCustomFieldValues: ["Forbidden"] });
+    await strict.app.listen({ port: 0, host: "127.0.0.1" });
+    try {
+      const profile = await profileFor(`id,name,priority\nR-1,Fine,High\nR-2,Refused,Forbidden\n`, "refused");
+      profile.testops.connection.endpoint = `http://127.0.0.1:${(strict.app.server.address() as AddressInfo).port}/`;
+      profile.fields = mergeSuggestedMappings([], (await discoverCsv(profile, files)).fields, null);
+      const summary = await run(profile);
+      expect(summary.counters).toMatchObject({ created: 1, failed: 1 });
+      const failed = summary.problems?.find((p) => p.code === "failed");
+      expect(failed).toMatchObject({
+        level: "error",
+        title: "Allure TestOps rejected custom field values.",
+        detail: "Custom field value [Forbidden] is not allowed for this project",
+        fix: { step: "fields" },
+        cases: ["Line 3"],
+      });
+      const line = (await store.log(profile.id, summary.id)).find((e) => e.level === "error");
+      expect(line?.message).toBe('Line 3: failed "Refused": Allure TestOps rejected custom field values. Custom field value [Forbidden] is not allowed for this project');
+    } finally {
+      await strict.app.close();
+    }
+  });
+
   it("updates an existing case given by its Allure ID", async () => {
     const existing = state.testCases.find((tc) => tc.name === "Search")!;
     const csv = `allure_id,name\n${existing.id},Search renamed\n`;

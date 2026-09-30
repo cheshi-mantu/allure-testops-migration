@@ -1,5 +1,6 @@
 import type {
   ConnectionCheck,
+  FixLink,
   NamedId,
   CsvFilePreview,
   PlannedCase,
@@ -17,6 +18,11 @@ export class ApiError extends Error {
   constructor(
     message: string,
     readonly status: number,
+    /** How to fix it, when the server knows. */
+    readonly hint?: string,
+    readonly fix?: FixLink,
+    /** Message of the remote system, verbatim. */
+    readonly detail?: string,
   ) {
     super(message);
   }
@@ -31,8 +37,8 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
   const text = await response.text();
   const data = text ? (JSON.parse(text) as unknown) : undefined;
   if (!response.ok) {
-    const message = (data as { message?: string } | undefined)?.message ?? `Request failed with ${response.status}`;
-    throw new ApiError(message, response.status);
+    const body = (data ?? {}) as { message?: string; hint?: string; fix?: FixLink; detail?: string };
+    throw new ApiError(body.message ?? `Request failed with ${response.status}`, response.status, body.hint, body.fix, body.detail);
   }
   return data as T;
 }
@@ -81,6 +87,7 @@ export const api = {
   cancelRun: (id: string) => request<{ cancelled: boolean }>("POST", `/api/profiles/${id}/runs/cancel`),
   runLog: (id: string, runId: string) => request<RunLogEntry[]>("GET", `/api/profiles/${id}/runs/${runId}/log`),
   runEventsUrl: (id: string, runId: string) => `/api/profiles/${id}/runs/${runId}/events`,
+  runLogUrl: (id: string, runId: string) => `/api/profiles/${id}/runs/${runId}/log.txt`,
 };
 
 export function errorText(error: unknown): string {

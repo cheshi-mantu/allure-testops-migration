@@ -1,4 +1,5 @@
-import type { FieldMapping, PlannedCase, PlannedStep, Profile, TextTarget } from "@atm/shared";
+import type { FieldMapping, PlannedCase, PlannedNote, PlannedStep, Profile, TextTarget } from "@atm/shared";
+import { note } from "./notes.js";
 import type { FieldCatalog } from "../testrail/fields.js";
 import { mapSectionPath, type SectionTree } from "../testrail/sections.js";
 import type { TrCase, TrProject, TrStep, TrSuite } from "../testrail/types.js";
@@ -82,7 +83,7 @@ export function transformCase(testCase: TrCase, context: SourceContext): Transfo
   const { profile, catalog } = context;
   const options = profile.options;
   const textOptions: TextOptions = { format: options.textFormat };
-  const notes: string[] = [];
+  const notes: PlannedNote[] = [];
   const linked = new Set<number>();
   const inlineIds = new Set<string>();
 
@@ -180,7 +181,7 @@ export function transformCase(testCase: TrCase, context: SourceContext): Transfo
           if (isUrl(value)) {
             planned.links.push({ name: field?.label ? `${field.label}: ${value}` : value, url: value });
           } else {
-            notes.push(`"${value}" from ${field?.label ?? mapping.source} is not a URL and cannot become a link.`);
+            notes.push(note.linkNotUrl(value, mapping.source, field?.label));
           }
         }
         break;
@@ -189,7 +190,7 @@ export function transformCase(testCase: TrCase, context: SourceContext): Transfo
           planned.issues.push({ key, integrationId: target.integrationId });
         }
         if (target.integrationId === null && planned.issues.length > 0) {
-          notes.push("Issues need an issue tracker integration; choose one in the field mapping.");
+          notes.push(note.issueWithoutIntegration(mapping.source, field?.label));
         }
         break;
       case "description":
@@ -216,7 +217,7 @@ export function transformCase(testCase: TrCase, context: SourceContext): Transfo
           break;
         }
         if (scenarioSet) {
-          notes.push(`${field?.label ?? mapping.source} also maps to the scenario; only the first non-empty one is used.`);
+          notes.push(note.scenarioTwice(mapping.source, field?.label));
           break;
         }
         planned.scenario = steps;

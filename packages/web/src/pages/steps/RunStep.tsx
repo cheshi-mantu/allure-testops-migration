@@ -2,6 +2,7 @@ import {
   Alert,
   Anchor,
   Badge,
+  Loader,
   Button,
   Card,
   Group,
@@ -16,12 +17,13 @@ import {
   Title,
 } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
-import { IconPlayerPlay, IconPlayerStop, IconTestPipe } from "@tabler/icons-react";
+import { IconDownload, IconPlayerPlay, IconPlayerStop, IconTestPipe } from "@tabler/icons-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { SECRET_MASK, type Profile, type RunLogEntry, type RunSummary } from "@atm/shared";
 import { api, errorText } from "../../api/client";
 import { useProfile } from "../../components/ProfileContext";
+import { FixButton, ProblemList } from "../../components/Problems";
 import { RunStatusBadge } from "../../components/RunStatusBadge";
 
 function problems(profile: Profile): string[] {
@@ -281,7 +283,7 @@ function RunDetails({ profile, run }: { profile: Profile; run: RunSummary }) {
             <Title order={5}>{summary.dryRun ? "Dry run" : "Migration"}</Title>
             <RunStatusBadge run={summary} />
             <Text size="sm" c="dimmed">
-              {summary.phase}
+              {summary.status === "running" ? "" : summary.phase}
             </Text>
           </Group>
           <Text size="sm" c="dimmed">
@@ -289,7 +291,20 @@ function RunDetails({ profile, run }: { profile: Profile; run: RunSummary }) {
             {summary.finishedAt ? ` – ${new Date(summary.finishedAt).toLocaleTimeString()}` : ""}
           </Text>
         </Group>
-        <Progress value={percent} animated={summary.status === "running"} size="lg" />
+        <Progress value={percent} animated={summary.status === "running"} striped={summary.status === "running"} size="lg" />
+        {summary.status === "running" && (
+          <Group gap="xs">
+            <Loader size="xs" />
+            <Text size="sm" fw={500}>
+              {summary.phase}
+            </Text>
+            {counters.total > 0 && counters.processed >= counters.total && (
+              <Text size="sm" c="dimmed">
+                all {counters.total} case(s) processed, finishing this step
+              </Text>
+            )}
+          </Group>
+        )}
         <Group gap="xs">
           <Badge variant="light">{counters.processed} / {counters.total} processed</Badge>
           {!summary.dryRun && (
@@ -307,7 +322,37 @@ function RunDetails({ profile, run }: { profile: Profile; run: RunSummary }) {
             </Badge>
           )}
         </Group>
-        {summary.error && <Alert color="red">{summary.error}</Alert>}
+        {summary.error && (
+          <Alert color="red" title={summary.status === "failed" ? "The run stopped" : "Error"}>
+            <Stack gap="xs">
+              <Text size="sm">{summary.error}</Text>
+              {summary.errorHint && <Text size="sm">{summary.errorHint}</Text>}
+              {summary.errorFix && (
+                <Group>
+                  <FixButton fix={summary.errorFix} />
+                </Group>
+              )}
+            </Stack>
+          </Alert>
+        )}
+        {(summary.problems?.length ?? 0) > 0 && (
+          <Stack gap="xs">
+            <Group justify="space-between">
+              <Title order={5}>
+                Problems ({summary.problems!.length})
+              </Title>
+              <Text size="xs" c="dimmed">
+                Each problem says why it happens and where to fix it. Runs can be repeated: migrated cases are updated, not duplicated.
+              </Text>
+            </Group>
+            <ProblemList problems={summary.problems!} />
+          </Stack>
+        )}
+        {summary.status !== "running" && (summary.problems?.length ?? 0) === 0 && !summary.error && (
+          <Alert color="green" variant="light">
+            No problems found.
+          </Alert>
+        )}
         <Group justify="space-between">
           <SegmentedControl
             size="xs"
@@ -319,6 +364,15 @@ function RunDetails({ profile, run }: { profile: Profile; run: RunSummary }) {
               { value: "errors", label: `Errors (${entries.filter((e) => e.level === "error").length})` },
             ]}
           />
+          <Button
+            size="xs"
+            variant="default"
+            component="a"
+            href={api.runLogUrl(profile.id, summary.id)}
+            leftSection={<IconDownload size={14} />}
+          >
+            Download log
+          </Button>
         </Group>
         <ScrollArea h={360} viewportRef={viewport} type="auto">
           <Stack gap={2}>

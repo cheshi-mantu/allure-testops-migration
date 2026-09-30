@@ -19,7 +19,8 @@ import {
 } from "@mantine/core";
 import { IconChevronDown, IconChevronRight } from "@tabler/icons-react";
 import { useQuery } from "@tanstack/react-query";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import {
   allowedTargets,
   mergeSuggestedMappings,
@@ -145,6 +146,9 @@ function FieldsEditor() {
   const { profile, update, source: testrail, testops } = useProfile();
   const discovery = testrail.data!;
   const [filter, setFilter] = useState<Filter>("all");
+  // "Fix in Columns: X" links open this step with ?field=X.
+  const [params] = useSearchParams();
+  const focusedField = params.get("field");
 
   // New fields get a suggested mapping; the user's choices stay untouched.
   useEffect(() => {
@@ -248,6 +252,7 @@ function FieldsEditor() {
             {group.fields.map((field) => (
               <FieldRow
                 key={field.systemName}
+                focused={field.systemName === focusedField}
                 field={field}
                 mapping={bySource.get(field.systemName)!}
                 sampled={discovery.sampledCases}
@@ -265,7 +270,9 @@ function FieldRow({
   mapping,
   sampled,
   onChange,
+  focused = false,
 }: {
+  focused?: boolean;
   field: TestRailFieldInfo;
   mapping: FieldMapping;
   sampled: number;
@@ -276,9 +283,23 @@ function FieldRow({
   const target = mapping.target;
   const showValues = field.options !== null && VALUE_TARGETS.includes(target.kind);
   const renamed = Object.keys(mapping.values).length;
+  const card = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (focused) {
+      setOpen(true);
+      card.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+    }
+  }, [focused]);
 
   return (
-    <Card withBorder padding="sm" className="field-row">
+    <Card
+      ref={card}
+      withBorder
+      padding="sm"
+      className="field-row"
+      style={focused ? { outline: "2px solid var(--mantine-color-blue-5)", outlineOffset: 2 } : undefined}
+    >
       <Grid align="flex-start">
         <Grid.Col span={{ base: 12, md: 5 }}>
           <Group gap={6}>

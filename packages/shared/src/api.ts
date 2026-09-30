@@ -169,6 +169,48 @@ export interface TestOpsDiscovery {
   warnings: string[];
 }
 
+// ---------------------------------------------------------------- Problems and how to fix them
+
+/** Profile steps a problem can point to. */
+export type FixStep = "connections" | "file" | "scope" | "structure" | "fields" | "options";
+
+/** Where the user fixes a problem: a step of the profile, optionally a field (source field or column). */
+export interface FixLink {
+  step: FixStep;
+  /** Source field system name or CSV column the fix concerns. */
+  field?: string;
+}
+
+/** Something about one case the user should know, with the way to fix it. */
+export interface PlannedNote {
+  /** Stable identifier of the kind of problem, e.g. `issue-no-integration`. */
+  code: string;
+  /** About this case, e.g. naming the value. */
+  text: string;
+  /** The same problem in general terms, used to group it over many cases. */
+  summary?: string;
+  hint?: string;
+  fix?: FixLink;
+}
+
+/** A problem of a run, aggregated over all cases it affects. */
+export interface RunProblem {
+  /** Groups identical problems, e.g. the same unknown owner. */
+  key: string;
+  code: string;
+  level: "warn" | "error";
+  /** What happened, in one sentence. */
+  title: string;
+  /** Why it happens and how to fix it. */
+  hint: string;
+  fix?: FixLink;
+  /** Error text from the remote system, verbatim, for support. */
+  detail?: string;
+  count: number;
+  /** Affected records: "Line 12" for CSV, "C123" for TestRail. Capped; see `count`. */
+  cases: string[];
+}
+
 // ---------------------------------------------------------------- Preview
 
 export interface PlannedAttachment {
@@ -217,7 +259,7 @@ export interface PlannedCase {
   attachments: PlannedAttachment[];
   scenario: PlannedStep[];
   /** Things that will not migrate as the user may expect. */
-  notes: string[];
+  notes: PlannedNote[];
 }
 
 // ---------------------------------------------------------------- Runs
@@ -243,6 +285,11 @@ export interface RunSummary {
   counters: RunCounters;
   phase: string;
   error: string | null;
+  /** How to fix `error`, when the run failed. */
+  errorHint?: string;
+  errorFix?: FixLink;
+  /** Problems found so far, most severe first. Missing in runs made by older versions. */
+  problems?: RunProblem[];
 }
 
 export type LogLevel = "debug" | "info" | "warn" | "error";
@@ -255,6 +302,8 @@ export interface RunLogEntry {
   /** Source case key: the TestRail case id or the CSV case key. */
   caseId?: string;
   targetId?: number;
+  /** Key of the RunProblem this line belongs to. */
+  problem?: string;
 }
 
 export interface ProfileListItem {

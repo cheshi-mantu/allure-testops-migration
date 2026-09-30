@@ -23,6 +23,7 @@ import { IconCheck, IconTrash, IconUpload } from "@tabler/icons-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { CSV_ENCODINGS, type CsvSource } from "@atm/shared";
 import { api, errorText } from "../../api/client";
+import { ErrorAlert } from "../../components/Problems";
 import { useProfile } from "../../components/ProfileContext";
 
 const DELIMITERS = [
@@ -277,7 +278,7 @@ export function FileStep() {
                 )}
               </Group>
               {preview.isFetching && !preview.data && <Loader size="sm" />}
-              {preview.error && <Alert color="red">{errorText(preview.error)}</Alert>}
+              {preview.error && <ErrorAlert error={preview.error} />}
               {preview.data?.warnings.map((warning) => (
                 <Alert key={warning} color="yellow">
                   {warning}

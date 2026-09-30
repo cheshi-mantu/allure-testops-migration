@@ -2,6 +2,7 @@ import { Alert, Autocomplete, Badge, Button, Group, Loader, Stack, Text } from "
 import { IconRefresh } from "@tabler/icons-react";
 import { useEffect, useRef, type ReactNode } from "react";
 import { errorText } from "../api/client";
+import { ErrorAlert } from "./Problems";
 import { useProfile } from "./ProfileContext";
 
 /**
@@ -44,16 +45,14 @@ export function DiscoveryGate({ children, needTestOps = true }: { children: Reac
   }
   if (error) {
     return (
-      <Alert color="red" title="Could not load data">
-        <Stack gap="xs">
-          <Text size="sm">{errorText(error)}</Text>
-          <Group>
-            <Button size="xs" variant="light" onClick={() => void refreshDiscovery()}>
-              Try again
-            </Button>
-          </Group>
-        </Stack>
-      </Alert>
+      <Stack gap="xs">
+        <ErrorAlert error={error} title="Could not load data" />
+        <Group>
+          <Button size="xs" variant="default" onClick={() => void refreshDiscovery()}>
+            Try again
+          </Button>
+        </Group>
+      </Stack>
     );
   }
   if (!testrail.data || (needTestOps && !testops.data)) {

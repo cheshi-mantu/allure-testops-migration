@@ -5,6 +5,7 @@ import {
   type SourceDiscovery,
   type SourceFieldInfo,
 } from "@atm/shared";
+import { KnownProblem } from "../engine/problems.js";
 import type { FileStore } from "../storage/fileStore.js";
 import { columnFor, groupCases, values, type CsvCase } from "./cases.js";
 import { readTable, type CsvTable } from "./parse.js";
@@ -23,8 +24,14 @@ export interface LoadedCsv {
 }
 
 export async function loadCsv(profile: Profile, files: FileStore): Promise<LoadedCsv> {
+  const missing = (title: string) =>
+    new KnownProblem({ key: "no-file", title, hint: "Upload the CSV file or choose one from the library on the CSV file step.", fix: { step: "file" } });
   if (!profile.csv.fileId) {
-    throw new Error("Choose a CSV file first.");
+    throw missing("No CSV file is chosen.");
+  }
+  const stored = await files.get(profile.csv.fileId);
+  if (!stored) {
+    throw missing("The CSV file of this profile is not in the file library any more, for example after importing the profile on another machine.");
   }
   const { info, data } = await files.read(profile.csv.fileId);
   return {

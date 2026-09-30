@@ -3,9 +3,11 @@ import { resolveAttachmentImages, resolveCaseLinks } from "../convert/markup.js"
 import type { TestOpsClient, ToAttachment, ToCustomFieldValue, ToScenarioStep, ToTestCase, ToTestCasePatch } from "../testops/client.js";
 import { contentTypeFor, safeFileName } from "./attachments.js";
 import type { CaseAttachments, SourceAssets } from "./assets.js";
+import { explain, fieldFor, KnownProblem, OperationFailed, type Operation, type ProblemInput } from "./problems.js";
 import type { TargetResolver } from "./targets.js";
 
-export type WriteLog = (level: "info" | "warn" | "error", message: string) => void;
+/** Log line from the writer; with a problem it also lands in the run's problem list. */
+export type WriteLog = (level: "info" | "warn" | "error", message: string, problem?: ProblemInput) => void;
 
 export interface WriteResult {
   testCaseId: number;
@@ -63,25 +65,45 @@ export class TestOpsWriter {
     return resolveCaseLinks(text, (id) => urls.get(String(id)) ?? null);
   }
 
+  /** Runs one call to Allure TestOps and remembers what it was for, so a failure can be explained. */
+  private async op<T>(operation: Operation, run: () => Promise<T>): Promise<T> {
+    try {
+      return await run();
+    } catch (error) {
+      throw error instanceof OperationFailed || error instanceof KnownProblem ? error : new OperationFailed(operation, error);
+    }
+  }
+
+  private explainFailure(error: unknown, operation: Operation): ProblemInput {
+    const e = explain(error, operation, { profile: this.profile, service: "Allure TestOps" });
+    return { ...e, code: "failed", level: "warn" };
+  }
+
   /** The case to update: the given Allure TestOps id, else the one carrying the migration tag. */
   private async findTarget(planned: PlannedCase): Promise<ToTestCase | null> {
     if (planned.allureId) {
       const byId = await this.testops.getTestCase(planned.allureId).catch(() => null);
       if (!byId || byId.projectId !== this.projectId) {
-        throw new Error(`Allure TestOps test case #${planned.allureId} does not exist in the target project.`);
+        const column = fieldFor(this.profile, (t) => t.kind === "allureId");
+        throw new KnownProblem({
+          key: "allure-id-missing",
+          title: `Allure TestOps test case #${planned.allureId} does not exist in project #${this.projectId}.`,
+          hint: "The file refers to cases of another project, or to deleted cases. To create new cases instead, map this column to \"Case id (for reruns)\".",
+          fix: { step: "fields", field: column },
+        });
       }
       return byId;
     }
-    return this.testops.findTestCaseByTag(this.projectId, `${this.tagPrefix}:${planned.sourceId}`);
+    return this.op("find the test case", () => this.testops.findTestCaseByTag(this.projectId, `${this.tagPrefix}:${planned.sourceId}`));
   }
 
   async writeCase(planned: PlannedCase, linkedCaseIds: string[], log: WriteLog): Promise<WriteResult> {
     const existing = await this.findTarget(planned);
-    const testCase = existing ?? (await this.testops.createTestCase(this.projectId, planned.name));
+    const testCase = existing ?? (await this.op("create the test case", () => this.testops.createTestCase(this.projectId, planned.name)));
     this.migrated.set(planned.sourceId, testCase.id);
 
     // Tags first: they make the case findable on rerun even if a later step fails.
-    await this.testops.setTags(testCase.id, planned.tags);
+    await this.op("set tags", () => this.testops.setTags(testCase.id, planned.tags));
 
     const source = this.assets.attachments(planned.sourceId);
     const uploader: Uploader = {
@@ -110,75 +132,128 @@ export class TestOpsWriter {
       links: planned.links,
     };
     if (planned.layer) {
-      const layer = await this.targets.layer(planned.layer);
-      if (layer) {
+      try {
+        const layer = await this.targets.layer(planned.layer);
         patch.testLayerId = layer.id;
+      } catch (error) {
+        const problem = this.explainFailure(error, "create a test layer");
+        log("warn", `Test layer "${planned.layer}" was not set: ${problem.title}`, {
+          ...problem,
+          key: `layer:${planned.layer}`,
+          code: "layer-not-created",
+          title: `Test layer "${planned.layer}" does not exist and could not be created.`,
+          hint: `${problem.hint} Or map the value to an existing layer in the value mapping of the layer field.`,
+          fix: { step: "fields", field: fieldFor(this.profile, (t) => t.kind === "layer") },
+        });
       }
     }
     if (planned.status) {
       const status = await this.targets.status(planned.status);
       if (status) {
         patch.statusId = status.id;
+      } else {
+        log("warn", `Status "${planned.status}" does not exist; the default status is kept.`, {
+          key: `status:${planned.status}`,
+          code: "status-missing",
+          level: "warn",
+          title: `Status "${planned.status}" does not exist in Allure TestOps; these cases keep the default status.`,
+          hint: "Statuses belong to the project's workflow and are not created by the migration. Map this value to an existing status in the value mapping of the status field, or add the status to the workflow in Allure TestOps.",
+          fix: { step: "fields", field: fieldFor(this.profile, (t) => t.kind === "status") },
+        });
       }
     }
-    await this.testops.updateTestCase(testCase.id, patch);
+    await this.op("update the test case", () => this.testops.updateTestCase(testCase.id, patch));
 
-    await this.writeCustomFields(testCase.id, planned.customFields);
+    await this.op("set custom fields", () => this.writeCustomFields(testCase.id, planned.customFields));
 
     const issuesByIntegration = planned.issues.filter((issue) => issue.integrationId !== null);
     if (issuesByIntegration.length > 0) {
-      await this.testops.setIssues(
-        testCase.id,
-        issuesByIntegration.map((issue) => ({ name: issue.key, integrationId: issue.integrationId! })),
+      await this.op("set issues", () =>
+        this.testops.setIssues(
+          testCase.id,
+          issuesByIntegration.map((issue) => ({ name: issue.key, integrationId: issue.integrationId! })),
+        ),
       );
     }
 
-    await this.writeMembers(testCase.id, planned);
+    await this.writeMembers(testCase.id, planned, log);
 
     if (planned.comments.length > 0) {
-      const present = new Set((await this.testops.comments(testCase.id)).map((c) => c.body.trim()));
-      for (const comment of planned.comments) {
-        const body = await text(comment);
-        if (!present.has(body.trim())) {
-          await this.testops.addComment(testCase.id, body);
+      await this.op("add comments", async () => {
+        const present = new Set((await this.testops.comments(testCase.id)).map((c) => c.body.trim()));
+        for (const comment of planned.comments) {
+          const body = await text(comment);
+          if (!present.has(body.trim())) {
+            await this.testops.addComment(testCase.id, body);
+          }
         }
-      }
+      });
     }
 
-    await this.testops.clearScenario(testCase.id);
     const steps = await this.scenarioSteps(planned.scenario, uploaded, linkedCaseIds, log);
-    if (steps.length > 0) {
-      await this.testops.setScenario(testCase.id, steps);
-    }
+    await this.op("set the scenario", async () => {
+      await this.testops.clearScenario(testCase.id);
+      if (steps.length > 0) {
+        await this.testops.setScenario(testCase.id, steps);
+      }
+    });
     return { testCaseId: testCase.id, created: existing === null };
   }
 
-  private async writeMembers(testCaseId: number, planned: PlannedCase): Promise<void> {
-    const members: { name: string; role: { id: number } }[] = [];
-    const owner = planned.owner ? await this.targets.owner(planned.owner) : null;
-    if (owner) {
-      members.push({ name: owner, role: { id: -1 } });
+  private userMissing(name: string, isOwner: boolean, log: WriteLog) {
+    const field = fieldFor(this.profile, (t) => (isOwner ? t.kind === "owner" : t.kind === "role"));
+    log("warn", `"${name}" is not an Allure TestOps user; ${isOwner ? "the owner" : "this member"} is not set.`, {
+      key: `user:${name}`,
+      code: "user-missing",
+      level: "warn",
+      title: `"${name}" is not an Allure TestOps user, so it is not set as ${isOwner ? "owner" : "member"}.`,
+      hint: "Map the source user to an existing Allure TestOps user name in the value mapping of the field, or create the user in Allure TestOps and run again.",
+      fix: { step: "fields", field },
+    });
+  }
+
+  private async writeMembers(testCaseId: number, planned: PlannedCase, log: WriteLog): Promise<void> {
+    const members: { name: string; role: { id: number }; owner: boolean }[] = [];
+    if (planned.owner) {
+      const owner = await this.targets.owner(planned.owner);
+      if (owner) {
+        members.push({ name: owner, role: { id: -1 }, owner: true });
+      } else {
+        this.userMissing(planned.owner, true, log);
+      }
     }
     for (const member of planned.members) {
       const [user, role] = await Promise.all([this.targets.owner(member.name), this.targets.role(member.role)]);
-      if (user && role && !members.some((m) => m.name === user && m.role.id === role.id)) {
-        members.push({ name: user, role: { id: role.id } });
+      if (!role) {
+        log("warn", `Role "${member.role}" does not exist; members with it are not set.`, {
+          key: `role:${member.role}`,
+          code: "role-missing",
+          level: "warn",
+          title: `Role "${member.role}" does not exist in Allure TestOps, so members with it are not set.`,
+          hint: "Choose an existing role for the column, or create the role in Allure TestOps (Administration, Roles) and run again.",
+          fix: { step: "fields", field: fieldFor(this.profile, (t) => t.kind === "role" && t.role === member.role) },
+        });
+      } else if (!user) {
+        this.userMissing(member.name, false, log);
+      } else if (!members.some((m) => m.name === user && m.role.id === role.id)) {
+        members.push({ name: user, role: { id: role.id }, owner: false });
       }
     }
     if (members.length === 0) {
       return;
     }
+    const body = (list: typeof members) => list.map(({ name, role }) => ({ name, role }));
     try {
-      await this.testops.setMembers(testCaseId, members);
+      await this.testops.setMembers(testCaseId, body(members));
     } catch {
       // Usually an unknown user; retry one by one so the valid members stay.
       const valid: typeof members = [];
       for (const member of members) {
         try {
-          await this.testops.setMembers(testCaseId, [...valid, member]);
+          await this.testops.setMembers(testCaseId, body([...valid, member]));
           valid.push(member);
         } catch {
-          this.targets.ownerMissing(member.name);
+          this.userMissing(member.name, member.owner, log);
         }
       }
     }
@@ -255,12 +330,26 @@ export class TestOpsWriter {
       const known = await this.existingCache.get(uploader)!;
       let target = known.find((a) => a.name === fileName);
       if (!target) {
-        target = await uploader.upload(fileName, data, contentType);
+        target = await this.op("upload attachments", () => uploader.upload(fileName, data, contentType));
         known.push(target);
       }
       uploaded.set(key, target);
     } catch (error) {
-      log("warn", message(error));
+      if (attachment.sourceId !== null && !(error instanceof OperationFailed)) {
+        // The source could not deliver the file.
+        log("warn", message(error), {
+          key: "attachment-download",
+          code: "attachment-download",
+          level: "warn",
+          title: "Some attachments could not be downloaded from TestRail.",
+          hint: this.assets.attachmentHint ?? "Check the source connection.",
+          fix: { step: "connections" },
+          detail: message(error),
+        });
+      } else {
+        const problem = this.explainFailure(error, "upload attachments");
+        log("warn", `Attachment "${attachment.fileName}" was not uploaded: ${problem.title}`, problem);
+      }
     }
   }
 
@@ -319,7 +408,12 @@ export class TestOpsWriter {
     let pending = this.sharedSteps.get(sourceId);
     if (!pending) {
       pending = this.migrateSharedStep(sourceId, log).catch((error) => {
-        log("warn", `Shared step ${sourceId} was not migrated: ${message(error)}`);
+        const problem = this.explainFailure(error, "migrate a shared step");
+        log("warn", `Shared step ${sourceId} was not migrated: ${problem.title}`, {
+          ...problem,
+          hint: `${problem.hint} Cases that use it get a step saying the shared step could not be migrated; turning off "Migrate shared steps" on the Options step copies its steps into each case instead.`,
+          fix: problem.fix ?? { step: "options" },
+        });
         return null;
       });
       this.sharedSteps.set(sourceId, pending);
