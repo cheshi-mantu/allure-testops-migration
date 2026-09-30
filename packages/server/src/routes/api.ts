@@ -7,7 +7,10 @@ import {
   PROFILE_FORMAT_VERSION,
   ProfileSchema,
   restoreSecrets,
+  SOURCES,
+  type CsvFilePreview,
   type PlannedCase,
+  type StoredFileInfo,
   type Profile,
   type ProfileListItem,
 } from "@atm/shared";
@@ -19,9 +22,14 @@ import { TestOpsClient } from "../testops/client.js";
 import { TestRailClient } from "../testrail/client.js";
 import { discoverTestOps } from "../testops/discovery.js";
 import { discoverTestRail, loadTestRailContext } from "../testrail/discovery.js";
+import { groupCases } from "../csv/cases.js";
+import { analyseColumns, discoverCsv, loadCsv } from "../csv/discovery.js";
+import { prepareSource } from "../engine/sources.js";
+import type { FileStore } from "../storage/fileStore.js";
 import { checkTestOps, checkTestRail } from "./checks.js";
 
 export interface ApiDeps {
+  files: FileStore;
   profiles: ProfileStore;
   runs: RunStore;
   runner: RunManager;
@@ -29,12 +37,18 @@ export interface ApiDeps {
 
 class NotFound extends Error {}
 
+const MAX_UPLOAD_BYTES = 200 * 1024 * 1024;
+
 function newId(): string {
   return randomUUID().replace(/-/g, "").slice(0, 12);
 }
 
 export async function registerApi(app: FastifyInstance, deps: ApiDeps): Promise<void> {
-  const { profiles, runs, runner } = deps;
+  const { profiles, runs, runner, files } = deps;
+
+  app.addContentTypeParser(["application/octet-stream", "text/csv", "application/vnd.ms-excel"], { parseAs: "buffer", bodyLimit: MAX_UPLOAD_BYTES }, (_request, body, done) =>
+    done(null, body),
+  );
 
   app.setErrorHandler((error, _request, reply) => {
     if (error instanceof NotFound) {
@@ -64,10 +78,13 @@ export async function registerApi(app: FastifyInstance, deps: ApiDeps): Promise<
 
   app.get("/api/profiles", async (): Promise<ProfileListItem[]> => {
     const all = await profiles.list();
+    const fileNames = new Map((await files.list()).map((f) => [f.id, f.name]));
     return Promise.all(
       all.map(async (profile) => ({
         id: profile.id,
         name: profile.name,
+        source: profile.source,
+        fileName: profile.csv.fileId ? (fileNames.get(profile.csv.fileId) ?? null) : null,
         updatedAt: profile.updatedAt,
         testrailEndpoint: profile.testrail.connection.endpoint,
         testopsEndpoint: profile.testops.connection.endpoint,
@@ -77,8 +94,8 @@ export async function registerApi(app: FastifyInstance, deps: ApiDeps): Promise<
   });
 
   app.post("/api/profiles", async (request) => {
-    const { name } = z.object({ name: z.string().trim().min(1) }).parse(request.body);
-    return maskSecrets(await profiles.save(newProfile(newId(), name)));
+    const { name, source } = z.object({ name: z.string().trim().min(1), source: z.enum(SOURCES).default("testrail") }).parse(request.body);
+    return maskSecrets(await profiles.save(newProfile(newId(), name, new Date(), source)));
   });
 
   app.get<{ Params: { id: string } }>("/api/profiles/:id", async (request) => maskSecrets(await load(request.params.id)));
@@ -153,7 +170,58 @@ export async function registerApi(app: FastifyInstance, deps: ApiDeps): Promise<
     return { suiteMode: project.suite_mode, suites: suites.map((s) => ({ id: s.id, name: s.name })) };
   });
 
-  app.post<{ Params: { id: string } }>("/api/profiles/:id/testrail/discover", async (request) => discoverTestRail(await load(request.params.id)));
+  const discoverSource = async (profile: Profile) => (profile.source === "csv" ? discoverCsv(profile, files) : discoverTestRail(profile));
+  app.post<{ Params: { id: string } }>("/api/profiles/:id/source/discover", async (request) => discoverSource(await load(request.params.id)));
+  app.post<{ Params: { id: string } }>("/api/profiles/:id/testrail/discover", async (request) => discoverSource(await load(request.params.id)));
+
+  // ------------------------------------------------------------ file library
+
+  const filesWithUsage = async (): Promise<StoredFileInfo[]> => {
+    const [list, all] = await Promise.all([files.list(), profiles.list()]);
+    return list.map((file) => ({
+      ...file,
+      usedBy: all.filter((p) => p.source === "csv" && p.csv.fileId === file.id).map((p) => ({ id: p.id, name: p.name })),
+    }));
+  };
+
+  app.get("/api/files", async () => filesWithUsage());
+
+  app.post<{ Querystring: { name?: string } }>(
+    "/api/files",
+    { bodyLimit: MAX_UPLOAD_BYTES },
+    async (request) => {
+      const data = request.body;
+      if (!Buffer.isBuffer(data) || data.length === 0) {
+        throw Object.assign(new Error("The file is empty."), { statusCode: 400 });
+      }
+      return files.save(request.query.name ?? "file.csv", data);
+    },
+  );
+
+  app.delete<{ Params: { fileId: string } }>("/api/files/:fileId", async (request, reply) => {
+    const usedBy = (await filesWithUsage()).find((f) => f.id === request.params.fileId)?.usedBy ?? [];
+    if (usedBy.length > 0) {
+      return reply.status(409).send({ message: `The file is used by ${usedBy.map((p) => `"${p.name}"`).join(", ")}.` });
+    }
+    await files.delete(request.params.fileId);
+    return reply.status(204).send();
+  });
+
+  app.get<{ Params: { id: string } }>("/api/profiles/:id/csv/preview", async (request): Promise<CsvFilePreview> => {
+    const profile = await load(request.params.id);
+    const { table } = await loadCsv(profile, files);
+    const grouped = groupCases(table, analyseColumns(profile, table).effective);
+    return {
+      delimiter: table.delimiter,
+      encoding: table.encoding,
+      columns: table.columns,
+      rows: table.rows.slice(0, 20).map((row) => table.columns.map((c) => row[c] ?? "")),
+      rowCount: table.rows.length,
+      caseCount: grouped.cases.length,
+      multiRow: grouped.multiRow,
+      warnings: table.warnings,
+    };
+  });
   app.post<{ Params: { id: string } }>("/api/profiles/:id/testops/discover", async (request) => discoverTestOps(await load(request.params.id)));
 
   app.get<{ Params: { id: string }; Querystring: { name?: string } }>("/api/profiles/:id/testops/cf-values", async (request) => {
@@ -170,9 +238,24 @@ export async function registerApi(app: FastifyInstance, deps: ApiDeps): Promise<
     return (await client.customFieldValues(field.id)).map((value) => value.name).sort((a, b) => a.localeCompare(b));
   });
 
-  app.post<{ Params: { id: string } }>("/api/profiles/:id/preview", async (request): Promise<PlannedCase & { linkedCaseIds: number[] }> => {
-    const { caseId } = z.object({ caseId: z.coerce.number().int().positive() }).parse(request.body);
+  app.post<{ Params: { id: string } }>("/api/profiles/:id/preview", async (request): Promise<PlannedCase & { linkedCaseIds: string[] }> => {
+    const { caseId: rawId } = z.object({ caseId: z.coerce.string().trim().min(1) }).parse(request.body);
     const profile = await load(request.params.id);
+    if (profile.source === "csv") {
+      const source = await prepareSource(profile, { files }, () => undefined);
+      const cases = await source.readCases(() => undefined, () => false);
+      const wanted = rawId.toLowerCase();
+      const testCase = cases.find((c) => c.key.toLowerCase() === wanted) ?? cases.find((c) => c.title.toLowerCase() === wanted);
+      if (!testCase) {
+        throw Object.assign(new Error(`No case "${rawId}" in the file.`), { statusCode: 404 });
+      }
+      const { planned, linkedCaseIds } = source.transform(testCase);
+      return { ...planned, linkedCaseIds };
+    }
+    const caseId = Number(rawId.replace(/^C/i, ""));
+    if (!Number.isInteger(caseId) || caseId <= 0) {
+      throw Object.assign(new Error(`"${rawId}" is not a TestRail case id.`), { statusCode: 400 });
+    }
     const context = await loadTestRailContext(profile);
     const testCase = await context.client.getCase(caseId);
     const { planned, linkedCaseIds } = transformCase(testCase, {

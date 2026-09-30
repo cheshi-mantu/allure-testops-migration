@@ -14,7 +14,7 @@ export function Layout() {
               <IconArrowsExchange size={22} color="var(--mantine-color-blue-6)" />
               <Text fw={700}>Allure TestOps Migration</Text>
               <Text c="dimmed" size="sm" visibleFrom="sm">
-                TestRail → Allure TestOps
+                TestRail, CSV → Allure TestOps
               </Text>
             </Group>
           </Link>

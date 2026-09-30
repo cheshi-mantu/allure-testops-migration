@@ -35,6 +35,7 @@ export async function discoverTestOps(profile: Profile, client = new TestOpsClie
     attempt("issue tracker integrations", () => client.integrations(projectId), []),
     attempt("trees", () => client.trees(projectId), []),
   ]);
+  const roles = await attempt("roles", () => client.roles(), []);
   let users: TestOpsDiscovery["users"] = null;
   try {
     users = (await client.accounts()).map((a) => ({
@@ -56,6 +57,7 @@ export async function discoverTestOps(profile: Profile, client = new TestOpsClie
     layers: layers.map(({ id, name }) => ({ id, name })),
     statuses: statuses.map(({ id, name }) => ({ id, name })),
     integrations: integrations.map(({ id, name }) => ({ id, name })),
+    roles: roles.map(({ id, name }) => ({ id, name })),
     users,
     trees: trees.map(({ id, name }) => ({ id, name })),
     warnings,

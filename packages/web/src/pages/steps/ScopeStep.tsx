@@ -9,6 +9,7 @@ export function ScopeStep() {
   const queryClient = useQueryClient();
 
   const trProjects = useQuery({
+    enabled: profile.source !== "csv",
     queryKey: ["projects", "testrail", profile.id],
     queryFn: async () => {
       await flush();
@@ -36,7 +37,7 @@ export function ScopeStep() {
       await flush();
       return api.testRailSuites(profile.id);
     },
-    enabled: Boolean(profile.testrail.scope.projectId),
+    enabled: profile.source !== "csv" && Boolean(profile.testrail.scope.projectId),
   });
 
   const invalidateDiscovery = () => void queryClient.removeQueries({ queryKey: ["discovery"] });
@@ -59,7 +60,8 @@ export function ScopeStep() {
 
   return (
     <Stack>
-      <SimpleGrid cols={{ base: 1, lg: 2 }}>
+      <SimpleGrid cols={{ base: 1, lg: profile.source === "csv" ? 1 : 2 }} maw={profile.source === "csv" ? 640 : undefined}>
+        {profile.source !== "csv" && (
         <Card withBorder>
           <Stack>
             <Title order={4}>From TestRail</Title>
@@ -112,6 +114,7 @@ export function ScopeStep() {
             />
           </Stack>
         </Card>
+        )}
         <Card withBorder>
           <Stack>
             <Title order={4}>To Allure TestOps</Title>

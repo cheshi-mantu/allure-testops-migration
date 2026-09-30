@@ -18,11 +18,11 @@ export interface SourceContext {
 
 export interface TransformResult {
   planned: PlannedCase;
-  /** Other TestRail cases this case links to. */
-  linkedCaseIds: number[];
+  /** Other source cases this case links to. */
+  linkedCaseIds: string[];
 }
 
-export function migrationTag(prefix: string, caseId: number): string {
+export function migrationTag(prefix: string, caseId: string | number): string {
   return `${prefix}:${caseId}`;
 }
 
@@ -87,7 +87,7 @@ export function transformCase(testCase: TrCase, context: SourceContext): Transfo
   const inlineIds = new Set<string>();
 
   const planned: PlannedCase = {
-    sourceId: testCase.id,
+    sourceId: String(testCase.id),
     sourceUrl: `${context.endpoint}index.php?/cases/view/${testCase.id}`,
     name: testCase.title,
     description: "",
@@ -98,6 +98,7 @@ export function transformCase(testCase: TrCase, context: SourceContext): Transfo
     layer: null,
     status: null,
     owner: null,
+    members: [],
     links: [],
     issues: [],
     comments: [],
@@ -109,7 +110,7 @@ export function transformCase(testCase: TrCase, context: SourceContext): Transfo
     planned.tags.push(options.additionalTag.trim());
   }
   if (options.selfLink) {
-    planned.links.push({ name: `TestRail C${testCase.id}`, url: planned.sourceUrl });
+    planned.links.push({ name: `TestRail C${testCase.id}`, url: `${context.endpoint}index.php?/cases/view/${testCase.id}` });
   }
 
   const texts: Record<TextTarget, string[]> = { description: [], precondition: [], expectedResult: [] };
@@ -238,7 +239,7 @@ export function transformCase(testCase: TrCase, context: SourceContext): Transfo
   }
   planned.attachments = [...inlineIds].map(inlineAttachment);
   linked.delete(testCase.id);
-  return { planned, linkedCaseIds: [...linked] };
+  return { planned, linkedCaseIds: [...linked].map(String) };
 }
 
 function scenarioFrom(testCase: TrCase, systemName: string, separated: boolean, context: SourceContext): PlannedStep[] {

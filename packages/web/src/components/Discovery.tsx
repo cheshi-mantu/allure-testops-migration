@@ -9,16 +9,17 @@ import { useProfile } from "./ProfileContext";
  * once the data is there. Loads automatically the first time.
  */
 export function DiscoveryGate({ children, needTestOps = true }: { children: ReactNode; needTestOps?: boolean }) {
-  const { profile, testrail, testops, refreshDiscovery } = useProfile();
+  const { profile, source: testrail, testops, refreshDiscovery } = useProfile();
   const started = useRef(false);
-  const ready = Boolean(profile.testrail.scope.projectId && (!needTestOps || profile.testops.scope.projectId));
+  const sourceReady = profile.source === "csv" ? Boolean(profile.csv.fileId) : Boolean(profile.testrail.scope.projectId);
+  const ready = sourceReady && (!needTestOps || Boolean(profile.testops.scope.projectId));
 
   useEffect(() => {
     if (!ready || started.current) {
       return;
     }
     started.current = true;
-    const missing = !testrail.data && !testrail.isFetching ? "testrail" : null;
+    const missing = !testrail.data && !testrail.isFetching ? "source" : null;
     const missingTarget = needTestOps && !testops.data && !testops.isFetching ? "testops" : null;
     if (missing && missingTarget) {
       void refreshDiscovery("both");
@@ -28,7 +29,8 @@ export function DiscoveryGate({ children, needTestOps = true }: { children: Reac
   }, [ready, needTestOps, testrail.data, testrail.isFetching, testops.data, testops.isFetching, refreshDiscovery]);
 
   if (!ready) {
-    return <Alert color="yellow">Choose the TestRail{needTestOps ? " and Allure TestOps" : ""} project first (step 2).</Alert>;
+    const what = profile.source === "csv" ? "the CSV file" : "the TestRail project";
+    return <Alert color="yellow">Choose {what}{needTestOps ? " and the Allure TestOps project" : ""} first.</Alert>;
   }
   const loading = testrail.isFetching || (needTestOps && testops.isFetching);
   const error = testrail.error ?? (needTestOps ? testops.error : null);
@@ -36,7 +38,7 @@ export function DiscoveryGate({ children, needTestOps = true }: { children: Reac
     return (
       <Group>
         <Loader size="sm" />
-        <Text c="dimmed">Reading projects, suites, sections, fields and sample cases…</Text>
+        <Text c="dimmed">{profile.source === "csv" ? "Reading the file…" : "Reading projects, suites, sections, fields and sample cases…"}</Text>
       </Group>
     );
   }
@@ -75,16 +77,16 @@ export function DiscoveryGate({ children, needTestOps = true }: { children: Reac
 }
 
 export function RefreshButton() {
-  const { testrail, testops, refreshDiscovery } = useProfile();
+  const { profile, source, testops, refreshDiscovery } = useProfile();
   return (
     <Button
       variant="subtle"
       size="xs"
       leftSection={<IconRefresh size={14} />}
-      loading={testrail.isFetching || testops.isFetching}
+      loading={source.isFetching || testops.isFetching}
       onClick={() => void refreshDiscovery()}
     >
-      Reload from TestRail and Allure TestOps
+      Reload from {profile.source === "csv" ? "the file" : "TestRail"} and Allure TestOps
     </Button>
   );
 }

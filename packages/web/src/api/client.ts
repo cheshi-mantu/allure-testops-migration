@@ -1,13 +1,16 @@
 import type {
   ConnectionCheck,
   NamedId,
+  CsvFilePreview,
   PlannedCase,
   Profile,
   ProfileListItem,
   RunLogEntry,
   RunSummary,
+  SourceDiscovery,
+  SourceType,
+  StoredFileInfo,
   TestOpsDiscovery,
-  TestRailDiscovery,
 } from "@atm/shared";
 
 export class ApiError extends Error {
@@ -40,7 +43,7 @@ export interface CheckResult extends ConnectionCheck {
 
 export const api = {
   profiles: () => request<ProfileListItem[]>("GET", "/api/profiles"),
-  createProfile: (name: string) => request<Profile>("POST", "/api/profiles", { name }),
+  createProfile: (name: string, source: SourceType) => request<Profile>("POST", "/api/profiles", { name, source }),
   profile: (id: string) => request<Profile>("GET", `/api/profiles/${id}`),
   saveProfile: (profile: Profile) => request<Profile>("PUT", `/api/profiles/${profile.id}`, profile),
   deleteProfile: (id: string) => request<void>("DELETE", `/api/profiles/${id}`),
@@ -51,11 +54,27 @@ export const api = {
   checkTestRail: (id: string) => request<CheckResult>("POST", `/api/profiles/${id}/testrail/check`),
   checkTestOps: (id: string) => request<CheckResult>("POST", `/api/profiles/${id}/testops/check`),
   testRailSuites: (id: string) => request<{ suiteMode: number; suites: NamedId[] }>("GET", `/api/profiles/${id}/testrail/suites`),
-  discoverTestRail: (id: string) => request<TestRailDiscovery>("POST", `/api/profiles/${id}/testrail/discover`),
+  discoverSource: (id: string) => request<SourceDiscovery>("POST", `/api/profiles/${id}/source/discover`),
+  csvPreview: (id: string) => request<CsvFilePreview>("GET", `/api/profiles/${id}/csv/preview`),
+
+  files: () => request<StoredFileInfo[]>("GET", "/api/files"),
+  uploadFile: async (file: File) => {
+    const response = await fetch(`/api/files?name=${encodeURIComponent(file.name)}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/octet-stream" },
+      body: file,
+    });
+    const data = (await response.json().catch(() => ({}))) as { message?: string };
+    if (!response.ok) {
+      throw new ApiError(data.message ?? `Upload failed with ${response.status}`, response.status);
+    }
+    return data as StoredFileInfo;
+  },
+  deleteFile: (fileId: string) => request<void>("DELETE", `/api/files/${fileId}`),
   discoverTestOps: (id: string) => request<TestOpsDiscovery>("POST", `/api/profiles/${id}/testops/discover`),
   customFieldValues: (id: string, name: string) =>
     request<string[]>("GET", `/api/profiles/${id}/testops/cf-values?name=${encodeURIComponent(name)}`),
-  preview: (id: string, caseId: number) => request<PlannedCase & { linkedCaseIds: number[] }>("POST", `/api/profiles/${id}/preview`, { caseId }),
+  preview: (id: string, caseId: string) => request<PlannedCase & { linkedCaseIds: string[] }>("POST", `/api/profiles/${id}/preview`, { caseId }),
 
   runs: (id: string) => request<RunSummary[]>("GET", `/api/profiles/${id}/runs`),
   startRun: (id: string, dryRun: boolean) => request<RunSummary>("POST", `/api/profiles/${id}/runs`, { dryRun }),

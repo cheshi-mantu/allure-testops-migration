@@ -148,6 +148,12 @@ export function createTestOpsMock(options: TestOpsMockOptions = {}): { app: Fast
   app.get("/api/uaa/account/me", async () => accounts[0]);
   app.get("/api/uaa/account", async (request) => pageOf(accounts, request));
 
+  app.get("/api/rs/role", async () => [
+    { id: -1, name: "Owner" },
+    { id: 2, name: "Reviewer" },
+    { id: 3, name: "Tester" },
+  ]);
+  app.get("/api/rs/testcase/:id", async (request) => testCase(request));
   app.get("/api/rs/project", async (request) => pageOf(projects, request));
   app.get("/api/rs/project/:id", async (request, reply) => {
     const project = projects.find((p) => p.id === Number((request.params as { id: string }).id));

@@ -103,6 +103,18 @@ export class TargetResolver {
     }
   }
 
+  private roleList: Promise<ToNamed[]> | null = null;
+
+  /** Roles are part of the instance configuration and are not created by the migration. */
+  async role(name: string): Promise<ToNamed | null> {
+    this.roleList ??= this.client.roles().catch(() => []);
+    const role = (await this.roleList).find((r) => r.name.toLowerCase() === name.trim().toLowerCase()) ?? null;
+    if (!role) {
+      this.warnOnce(`role:${name}`, `Role "${name}" does not exist in Allure TestOps; members with this role are skipped.`);
+    }
+    return role;
+  }
+
   /** Statuses belong to workflows and are not created by the migration. */
   async status(name: string): Promise<ToNamed | null> {
     this.statuses ??= this.client.statuses();

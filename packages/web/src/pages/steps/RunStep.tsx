@@ -27,25 +27,43 @@ import { RunStatusBadge } from "../../components/RunStatusBadge";
 function problems(profile: Profile): string[] {
   const list: string[] = [];
   const has = (value: string) => value === SECRET_MASK || value.trim() !== "";
-  if (!profile.testrail.connection.endpoint || !has(profile.testrail.connection.apiKey)) {
-    list.push("TestRail connection is incomplete (step 1).");
-  }
   if (!profile.testops.connection.endpoint || !has(profile.testops.connection.apiToken)) {
-    list.push("Allure TestOps connection is incomplete (step 1).");
+    list.push("The Allure TestOps connection is incomplete (Connections).");
+  }
+  if (profile.source === "csv") {
+    if (!profile.csv.fileId) {
+      list.push("Choose a CSV file (CSV file).");
+    }
+    if (!profile.testops.scope.projectId) {
+      list.push("Choose the Allure TestOps project (Project).");
+    }
+    const names = profile.fields.filter((m) => m.target.kind === "name").length;
+    if (names !== 1) {
+      list.push("Map exactly one column to the test case name (Columns).");
+    }
+    return list;
+  }
+  if (!profile.testrail.connection.endpoint || !has(profile.testrail.connection.apiKey)) {
+    list.push("The TestRail connection is incomplete (Connections).");
   }
   if (!profile.testrail.scope.projectId || !profile.testops.scope.projectId) {
-    list.push("Choose both projects (step 2).");
+    list.push("Choose both projects (Projects).");
   }
   if (profile.fields.length === 0) {
-    list.push("Review the field mapping (step 4).");
+    list.push("Review the field mapping (Fields).");
   }
   return list;
 }
 
 function warnings(profile: Profile): string[] {
   const list: string[] = [];
-  if (!profile.structure.levels.some(Boolean) && !profile.structure.suiteField) {
-    list.push("No suite or section level is mapped, so the TestRail structure will not be kept.");
+  if (profile.source === "csv" && !profile.csv.pathColumn) {
+    list.push("No section path column is chosen, so cases will not be grouped into sections.");
+  } else if (!profile.structure.levels.some(Boolean) && !profile.structure.suiteField) {
+    list.push("No suite or section level is mapped, so the source structure will not be kept.");
+  }
+  if (profile.fields.some((m) => m.target.kind === "role" && !m.target.role)) {
+    list.push("A column maps to members without a role; those members will be skipped.");
   }
   if (profile.fields.some((m) => m.target.kind === "issue" && m.target.integrationId === null)) {
     list.push("A field maps to issues without an issue tracker integration; those issues will be skipped.");
@@ -216,8 +234,8 @@ export function RunStep() {
       <Modal opened={confirm} onClose={() => setConfirm(false)} title="Start the migration?">
         <Stack>
           <Text size="sm">
-            Test cases, custom fields, shared steps and attachments will be created or updated in Allure TestOps project #
-            {profile.testops.scope.projectId}. TestRail is only read.
+            Test cases and custom fields{profile.source === "testrail" ? ", shared steps and attachments" : ""} will be created or updated in
+            Allure TestOps project #{profile.testops.scope.projectId}. {profile.source === "testrail" ? "TestRail is only read." : "The file is not changed."}
           </Text>
           <Group justify="flex-end">
             <Button variant="default" onClick={() => setConfirm(false)}>
@@ -303,11 +321,16 @@ function RunDetails({ profile, run }: { profile: Profile; run: RunSummary }) {
             {shown.map((entry) => (
               <Text key={entry.seq} size="xs" className="mono log-line" c={LEVEL_COLORS[entry.level]}>
                 {new Date(entry.time).toLocaleTimeString()}{" "}
-                {entry.caseId !== undefined && (
-                  <Anchor href={`${testrailBase}index.php?/cases/view/${entry.caseId}`} target="_blank" size="xs" className="mono">
-                    C{entry.caseId}
-                  </Anchor>
-                )}
+                {entry.caseId !== undefined &&
+                  (profile.source === "testrail" ? (
+                    <Anchor href={`${testrailBase}index.php?/cases/view/${entry.caseId}`} target="_blank" size="xs" className="mono">
+                      C{entry.caseId}
+                    </Anchor>
+                  ) : (
+                    <Text span size="xs" className="mono" c="dimmed">
+                      [{entry.caseId}]
+                    </Text>
+                  ))}
                 {entry.caseId !== undefined && " "}
                 {entry.message}
                 {entry.targetId !== undefined && profile.testops.scope.projectId && (

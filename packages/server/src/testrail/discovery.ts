@@ -91,6 +91,7 @@ export async function discoverTestRail(profile: Profile): Promise<TestRailDiscov
 
   const maxDepth = structure.reduce((max, s) => Math.max(max, s.maxDepth), 0);
   return {
+    source: "testrail",
     project: { id: project.id, name: project.name, suiteMode: project.suite_mode },
     suites: suites.map((s) => ({ id: s.id, name: s.name })),
     structure,
@@ -98,7 +99,7 @@ export async function discoverTestRail(profile: Profile): Promise<TestRailDiscov
     levels: mergeLevelStats(structure.map((s) => s.levels)),
     fields: catalog.toInfo(collectStats(catalog, samples)),
     sampledCases: samples.length,
-    sampleCaseIds: samples.slice(0, 50).map((c) => ({ id: c.id, name: c.title })),
+    sampleCaseIds: samples.slice(0, 50).map((c) => ({ id: String(c.id), name: c.title })),
     warnings,
   };
 }

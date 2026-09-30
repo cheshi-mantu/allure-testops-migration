@@ -5,6 +5,7 @@ import fastifyStatic from "@fastify/static";
 import Fastify from "fastify";
 import { RunManager } from "./engine/runner.js";
 import { registerApi } from "./routes/api.js";
+import { FileStore } from "./storage/fileStore.js";
 import { ProfileStore } from "./storage/profiles.js";
 import { RunStore } from "./storage/runs.js";
 
@@ -21,7 +22,8 @@ const app = Fastify({
 });
 
 const runs = new RunStore(dataDir);
-await registerApi(app, { profiles: new ProfileStore(dataDir), runs, runner: new RunManager(runs) });
+const files = new FileStore(dataDir);
+await registerApi(app, { profiles: new ProfileStore(dataDir), runs, files, runner: new RunManager(runs, { files }) });
 
 if (existsSync(webDir)) {
   await app.register(fastifyStatic, {

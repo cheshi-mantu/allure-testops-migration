@@ -1,13 +1,11 @@
 import { randomUUID } from "node:crypto";
 import { testRailRequestsPerMinute, type LogLevel, type Profile, type RunLogEntry, type RunSummary } from "@atm/shared";
-import { transformCase, type SourceContext } from "../convert/transform.js";
 import { sharedRateLimiter, type RateLimiter } from "../http/rateLimiter.js";
 import { TestOpsClient } from "../testops/client.js";
 import { discoverTestOps, requireTestOpsProject } from "../testops/discovery.js";
-import { loadTestRailContext } from "../testrail/discovery.js";
-import type { TrCase } from "../testrail/types.js";
 import type { RunStore } from "../storage/runs.js";
 import { TargetResolver } from "./targets.js";
+import { prepareSource, type PreparedSource, type SourceCase, type SourceDeps } from "./sources.js";
 import { TestOpsWriter } from "./writer.js";
 
 type Listener = (event: { type: "log"; entry: RunLogEntry } | { type: "summary"; summary: RunSummary }) => void;
@@ -28,6 +26,7 @@ export class Run {
     private readonly profile: Profile,
     dryRun: boolean,
     private readonly store: RunStore,
+    private readonly deps: SourceDeps,
   ) {
     this.summary = {
       id: `${new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14)}-${randomUUID().slice(0, 8)}`,
@@ -58,7 +57,7 @@ export class Run {
     }
   }
 
-  log(level: LogLevel, message: string, caseId?: number, targetId?: number) {
+  log(level: LogLevel, message: string, caseId?: string, targetId?: number) {
     const entry: RunLogEntry = { seq: ++this.seq, time: new Date().toISOString(), level, message, caseId, targetId };
     this.pendingLog.push(entry);
     this.listeners.forEach((listener) => listener({ type: "log", entry }));
@@ -128,25 +127,19 @@ export class Run {
 
   private async work() {
     const profile = this.profile;
-    this.phase("Connecting to TestRail");
-    const perMinute = testRailRequestsPerMinute(profile.testrail.connection);
-    if (perMinute === null) {
-      this.log("info", "TestRail rate limit: off.");
-    } else {
-      const limiter = sharedRateLimiter(profile.testrail.connection.endpoint, perMinute);
-      this.rateLimit = { limiter, requests: limiter.requests, waitedMs: limiter.waitedMs };
-      this.log("info", `TestRail rate limit: ${perMinute} requests per minute, shared by everything this tool sends to that TestRail instance.`);
+    const log = (level: "info" | "warn", message: string, caseId?: string) => this.log(level, message, caseId);
+    this.phase(profile.source === "csv" ? "Reading the CSV file" : "Connecting to TestRail");
+    if (profile.source === "testrail") {
+      const perMinute = testRailRequestsPerMinute(profile.testrail.connection);
+      if (perMinute === null) {
+        this.log("info", "TestRail rate limit: off.");
+      } else {
+        const limiter = sharedRateLimiter(profile.testrail.connection.endpoint, perMinute);
+        this.rateLimit = { limiter, requests: limiter.requests, waitedMs: limiter.waitedMs };
+        this.log("info", `TestRail rate limit: ${perMinute} requests per minute, shared by everything this tool sends to that TestRail instance.`);
+      }
     }
-    const trContext = await loadTestRailContext(profile);
-    trContext.warnings.forEach((warning) => this.log("warn", warning));
-    const context: SourceContext = {
-      catalog: trContext.catalog,
-      profile,
-      endpoint: trContext.client.endpoint,
-      project: trContext.project,
-      suites: new Map(trContext.suites.map((suite) => [suite.id, suite])),
-      sections: trContext.sections,
-    };
+    const source = await prepareSource(profile, this.deps, log);
 
     this.phase("Connecting to Allure TestOps");
     const projectId = requireTestOpsProject(profile);
@@ -156,14 +149,14 @@ export class Run {
     const targets = new TargetResolver(testops, projectId, (level, message) => this.log(level, message));
 
     this.checkCancelled();
-    this.phase("Reading test cases from TestRail");
-    const cases = await this.collectCases(trContext.client, trContext.project.id, [...context.suites.keys()]);
+    this.phase(`Reading test cases from ${source.name}`);
+    const cases = await source.readCases(log, () => this.cancelled);
     this.summary.counters.total = cases.length;
     this.log("info", `${cases.length} test case(s) to migrate.`);
     this.emitSummary();
 
     if (this.summary.dryRun) {
-      await this.dryRun(cases, context, testops);
+      await this.dryRun(cases, source, testops);
       return;
     }
 
@@ -173,19 +166,19 @@ export class Run {
 
     this.checkCancelled();
     this.phase("Migrating test cases");
-    const writer = new TestOpsWriter(profile, testops, trContext.client, targets, projectId);
-    const casesById = new Map(cases.map((c) => [c.id, c]));
-    const migratedIds = new Set<number>();
-    const relink = new Set<number>();
+    const writer = new TestOpsWriter(profile, testops, source.assets, targets, projectId);
+    const casesByKey = new Map(cases.map((c) => [c.key, c]));
+    const migratedKeys = new Set<string>();
+    const relink = new Set<string>();
 
     await pool(cases, profile.options.concurrency, async (testCase) => {
       if (this.cancelled) {
         return;
       }
-      const ok = await this.migrateOne(testCase, context, writer);
-      migratedIds.add(testCase.id);
-      if (ok && ok.linkedCaseIds.some((id) => casesById.has(id) && !migratedIds.has(id))) {
-        relink.add(testCase.id);
+      const ok = await this.migrateOne(testCase, source, writer);
+      migratedKeys.add(testCase.key);
+      if (ok && ok.linkedCaseIds.some((id) => casesByKey.has(id) && !migratedKeys.has(id))) {
+        relink.add(testCase.key);
       }
     });
     targets.reportMissingOwners();
@@ -193,29 +186,28 @@ export class Run {
 
     if (relink.size > 0) {
       this.phase(`Updating links in ${relink.size} case(s) that point to cases migrated later`);
-      await pool([...relink], profile.options.concurrency, async (caseId) => {
-        const testCase = casesById.get(caseId)!;
-        const { planned, linkedCaseIds } = transformCase(testCase, context);
+      await pool([...relink], profile.options.concurrency, async (key) => {
+        const { planned, linkedCaseIds } = source.transform(casesByKey.get(key)!);
         try {
-          await writer.writeCase(planned, linkedCaseIds, (level, message) => this.log(level, message, caseId));
+          await writer.writeCase(planned, linkedCaseIds, (level, message) => this.log(level, message, key));
         } catch (error) {
-          this.log("warn", `Links were not updated: ${errorMessage(error)}`, caseId);
+          this.log("warn", `Links were not updated: ${errorMessage(error)}`, key);
         }
       });
     }
   }
 
-  private async migrateOne(testCase: TrCase, context: SourceContext, writer: TestOpsWriter) {
+  private async migrateOne(testCase: SourceCase, source: PreparedSource, writer: TestOpsWriter) {
     try {
-      const result = transformCase(testCase, context);
-      result.planned.notes.forEach((note) => this.log("warn", note, testCase.id));
-      const written = await writer.writeCase(result.planned, result.linkedCaseIds, (level, message) => this.log(level, message, testCase.id));
+      const result = source.transform(testCase);
+      result.planned.notes.forEach((note) => this.log("warn", note, testCase.key));
+      const written = await writer.writeCase(result.planned, result.linkedCaseIds, (level, message) => this.log(level, message, testCase.key));
       this.summary.counters[written.created ? "created" : "updated"] += 1;
-      this.log("info", `${written.created ? "Created" : "Updated"} "${testCase.title}"`, testCase.id, written.testCaseId);
+      this.log("info", `${written.created ? "Created" : "Updated"} "${result.planned.name}"`, testCase.key, written.testCaseId);
       return result;
     } catch (error) {
       this.summary.counters.failed += 1;
-      this.log("error", `Failed "${testCase.title}": ${errorMessage(error)}`, testCase.id);
+      this.log("error", `Failed "${testCase.title}": ${errorMessage(error)}`, testCase.key);
       return null;
     } finally {
       this.summary.counters.processed += 1;
@@ -223,12 +215,13 @@ export class Run {
     }
   }
 
-  private async dryRun(cases: TrCase[], context: SourceContext, testops: TestOpsClient) {
+  private async dryRun(cases: SourceCase[], source: PreparedSource, testops: TestOpsClient) {
     this.phase("Checking conversion");
     const fieldValues = new Map<string, Set<string>>();
     const layers = new Map<string, number>();
     const statuses = new Map<string, number>();
     const owners = new Map<string, number>();
+    const roles = new Map<string, number>();
     const sharedSteps = new Set<number>();
     let attachments = 0;
     let issuesWithoutIntegration = 0;
@@ -237,8 +230,8 @@ export class Run {
     for (const testCase of cases) {
       this.checkCancelled();
       try {
-        const { planned } = transformCase(testCase, context);
-        planned.notes.forEach((note) => this.log("warn", note, testCase.id));
+        const { planned } = source.transform(testCase);
+        planned.notes.forEach((note) => this.log("warn", note, testCase.key));
         for (const [name, values] of Object.entries(planned.customFields)) {
           const set = fieldValues.get(name) ?? new Set<string>();
           values.forEach((value) => set.add(value));
@@ -247,13 +240,17 @@ export class Run {
         count(layers, planned.layer);
         count(statuses, planned.status);
         count(owners, planned.owner);
+        planned.members.forEach((member) => {
+          count(owners, member.name);
+          count(roles, member.role);
+        });
         planned.scenario.forEach((step) => step.type === "shared" && sharedSteps.add(step.sourceId));
         attachments += planned.attachments.length;
         issuesWithoutIntegration += planned.issues.filter((issue) => issue.integrationId === null).length;
         this.summary.counters.skipped += 1;
       } catch (error) {
         this.summary.counters.failed += 1;
-        this.log("error", `Cannot convert "${testCase.title}": ${errorMessage(error)}`, testCase.id);
+        this.log("error", `Cannot convert "${testCase.title}": ${errorMessage(error)}`, testCase.key);
       }
       this.summary.counters.processed += 1;
       if (this.summary.counters.processed % 50 === 0) {
@@ -292,11 +289,16 @@ export class Run {
     if (target.users) {
       for (const [name, total] of owners) {
         if (!target.users.some((user) => user.username === name)) {
-          this.log("warn", `Owner "${name}" is not an Allure TestOps user; ${total} case(s) would have no owner.`);
+          this.log("warn", `"${name}" is not an Allure TestOps user; ${total} case(s) would miss this owner or member.`);
         }
       }
     } else if (owners.size > 0) {
       this.log("info", "The token cannot list users, so owners are not checked in advance.");
+    }
+    for (const [name, total] of roles) {
+      if (!target.roles.some((role) => role.name.toLowerCase() === name.toLowerCase())) {
+        this.log("warn", `Role "${name}" does not exist in Allure TestOps; ${total} member(s) would be skipped.`);
+      }
     }
     if (issuesWithoutIntegration > 0) {
       this.log("warn", `${issuesWithoutIntegration} issue link(s) have no issue tracker integration and will be skipped.`);
@@ -306,41 +308,19 @@ export class Run {
       const exists = target.trees.some((tree) => tree.name === this.profile.structure.treeName);
       this.log("info", exists ? `Tree "${this.profile.structure.treeName}" already exists and is kept.` : `Tree "${this.profile.structure.treeName}" will be created.`);
     }
-    this.log("info", `${sharedSteps.size} shared step(s) and ${attachments} inline attachment(s) are referenced; attachments of cases are migrated too.`);
-    // One attachment listing per case, one download per attachment, one read per shared step.
-    const requests = cases.length + attachments + sharedSteps.size;
-    const perMinute = testRailRequestsPerMinute(this.profile.testrail.connection);
-    this.log(
-      "info",
-      perMinute === null
-        ? `The migration needs at least ${requests} more TestRail request(s).`
-        : `The migration needs at least ${requests} more TestRail request(s): about ${Math.max(1, Math.ceil(requests / perMinute))} minute(s) or more at ${perMinute} requests per minute.`,
-    );
+    if (source.testrail) {
+      this.log("info", `${sharedSteps.size} shared step(s) and ${attachments} inline attachment(s) are referenced; attachments of cases are migrated too.`);
+      // One attachment listing per case, one download per attachment, one read per shared step.
+      const requests = cases.length + attachments + sharedSteps.size;
+      const perMinute = testRailRequestsPerMinute(this.profile.testrail.connection);
+      this.log(
+        "info",
+        perMinute === null
+          ? `The migration needs at least ${requests} more TestRail request(s).`
+          : `The migration needs at least ${requests} more TestRail request(s): about ${Math.max(1, Math.ceil(requests / perMinute))} minute(s) or more at ${perMinute} requests per minute.`,
+      );
+    }
     this.emitSummary();
-  }
-
-  private async collectCases(client: Awaited<ReturnType<typeof loadTestRailContext>>["client"], projectId: number, suiteIds: number[]): Promise<TrCase[]> {
-    const caseIds = this.profile.testrail.scope.caseIds;
-    if (caseIds.length > 0) {
-      const cases: TrCase[] = [];
-      for (const id of caseIds) {
-        try {
-          cases.push(await client.getCase(id));
-        } catch (error) {
-          this.summary.counters.skipped += 1;
-          this.log("warn", `Case C${id} cannot be read: ${errorMessage(error)}`, id);
-        }
-      }
-      return cases;
-    }
-    const cases: TrCase[] = [];
-    for (const suiteId of suiteIds) {
-      this.checkCancelled();
-      const suiteCases = await client.getCases(projectId, suiteId, this.profile.options.includeDeleted);
-      this.log("info", `Suite ${suiteId}: ${suiteCases.length} case(s).`);
-      cases.push(...suiteCases);
-    }
-    return cases;
   }
 
   /** Creates the structure custom fields up front and the tree built from them. */
@@ -389,13 +369,16 @@ function errorMessage(error: unknown): string {
 export class RunManager {
   private readonly active = new Map<string, Run>();
 
-  constructor(private readonly store: RunStore) {}
+  constructor(
+    private readonly store: RunStore,
+    private readonly deps: SourceDeps,
+  ) {}
 
   start(profile: Profile, dryRun: boolean): RunSummary {
     if (this.active.has(profile.id)) {
       throw new Error("A migration for this profile is already running.");
     }
-    const run = new Run(profile, dryRun, this.store);
+    const run = new Run(profile, dryRun, this.store, this.deps);
     this.active.set(profile.id, run);
     void run.execute().finally(() => {
       if (this.active.get(profile.id) === run) {

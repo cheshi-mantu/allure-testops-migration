@@ -1,9 +1,8 @@
 import type { PlannedAttachment, PlannedCase, PlannedStep, Profile } from "@atm/shared";
 import { resolveAttachmentImages, resolveCaseLinks } from "../convert/markup.js";
-import { separatedSteps } from "../convert/steps.js";
-import type { TestOpsClient, ToAttachment, ToCustomFieldValue, ToScenarioStep, ToTestCasePatch } from "../testops/client.js";
-import type { TestRailClient } from "../testrail/client.js";
-import { AttachmentSource, contentTypeFor, safeFileName } from "./attachments.js";
+import type { TestOpsClient, ToAttachment, ToCustomFieldValue, ToScenarioStep, ToTestCase, ToTestCasePatch } from "../testops/client.js";
+import { contentTypeFor, safeFileName } from "./attachments.js";
+import type { CaseAttachments, SourceAssets } from "./assets.js";
 import type { TargetResolver } from "./targets.js";
 
 export type WriteLog = (level: "info" | "warn" | "error", message: string) => void;
@@ -23,14 +22,14 @@ interface Uploader {
  * cases are found by their migration tag, shared steps by name, attachments by file name.
  */
 export class TestOpsWriter {
-  /** TestRail case id -> Allure TestOps test case id, filled as cases are migrated. */
-  private readonly migrated = new Map<number, number>();
+  /** Source case key -> Allure TestOps test case id, filled as cases are migrated. */
+  private readonly migrated = new Map<string, number>();
   private readonly sharedSteps = new Map<number, Promise<number | null>>();
 
   constructor(
     private readonly profile: Profile,
     private readonly testops: TestOpsClient,
-    private readonly testrail: TestRailClient,
+    private readonly assets: SourceAssets,
     private readonly targets: TargetResolver,
     private readonly projectId: number,
   ) {}
@@ -39,8 +38,8 @@ export class TestOpsWriter {
     return this.profile.options.migrationTagPrefix;
   }
 
-  /** Allure TestOps URL for a TestRail case that is already migrated (in this run or before). */
-  async testCaseUrlFor(caseId: number): Promise<string | null> {
+  /** Allure TestOps URL for a source case that is already migrated (in this run or before). */
+  async testCaseUrlFor(caseId: string): Promise<string | null> {
     let id = this.migrated.get(caseId);
     if (id === undefined) {
       const found = await this.testops.findTestCaseByTag(this.projectId, `${this.tagPrefix}:${caseId}`).catch(() => null);
@@ -53,27 +52,38 @@ export class TestOpsWriter {
     return this.testops.testCaseUrl(this.projectId, id);
   }
 
-  private async resolveLinks(text: string, linkedCaseIds: number[]): Promise<string> {
+  private async resolveLinks(text: string, linkedCaseIds: string[]): Promise<string> {
     if (!text || linkedCaseIds.length === 0) {
       return text;
     }
-    const urls = new Map<number, string | null>();
+    const urls = new Map<string, string | null>();
     for (const id of linkedCaseIds) {
       urls.set(id, await this.testCaseUrlFor(id));
     }
-    return resolveCaseLinks(text, (id) => urls.get(id) ?? null);
+    return resolveCaseLinks(text, (id) => urls.get(String(id)) ?? null);
   }
 
-  async writeCase(planned: PlannedCase, linkedCaseIds: number[], log: WriteLog): Promise<WriteResult> {
-    const tag = `${this.tagPrefix}:${planned.sourceId}`;
-    const existing = await this.testops.findTestCaseByTag(this.projectId, tag);
+  /** The case to update: the given Allure TestOps id, else the one carrying the migration tag. */
+  private async findTarget(planned: PlannedCase): Promise<ToTestCase | null> {
+    if (planned.allureId) {
+      const byId = await this.testops.getTestCase(planned.allureId).catch(() => null);
+      if (!byId || byId.projectId !== this.projectId) {
+        throw new Error(`Allure TestOps test case #${planned.allureId} does not exist in the target project.`);
+      }
+      return byId;
+    }
+    return this.testops.findTestCaseByTag(this.projectId, `${this.tagPrefix}:${planned.sourceId}`);
+  }
+
+  async writeCase(planned: PlannedCase, linkedCaseIds: string[], log: WriteLog): Promise<WriteResult> {
+    const existing = await this.findTarget(planned);
     const testCase = existing ?? (await this.testops.createTestCase(this.projectId, planned.name));
     this.migrated.set(planned.sourceId, testCase.id);
 
     // Tags first: they make the case findable on rerun even if a later step fails.
     await this.testops.setTags(testCase.id, planned.tags);
 
-    const source = new AttachmentSource(this.testrail, planned.sourceId);
+    const source = this.assets.attachments(planned.sourceId);
     const uploader: Uploader = {
       existing: () => this.testops.testCaseAttachments(testCase.id),
       upload: (name, data, type) => this.testops.uploadTestCaseAttachment(testCase.id, name, data, type),
@@ -123,14 +133,7 @@ export class TestOpsWriter {
       );
     }
 
-    const owner = planned.owner ? await this.targets.owner(planned.owner) : null;
-    if (owner) {
-      try {
-        await this.testops.setOwner(testCase.id, owner);
-      } catch {
-        this.targets.ownerMissing(owner);
-      }
-    }
+    await this.writeMembers(testCase.id, planned);
 
     if (planned.comments.length > 0) {
       const present = new Set((await this.testops.comments(testCase.id)).map((c) => c.body.trim()));
@@ -148,6 +151,37 @@ export class TestOpsWriter {
       await this.testops.setScenario(testCase.id, steps);
     }
     return { testCaseId: testCase.id, created: existing === null };
+  }
+
+  private async writeMembers(testCaseId: number, planned: PlannedCase): Promise<void> {
+    const members: { name: string; role: { id: number } }[] = [];
+    const owner = planned.owner ? await this.targets.owner(planned.owner) : null;
+    if (owner) {
+      members.push({ name: owner, role: { id: -1 } });
+    }
+    for (const member of planned.members) {
+      const [user, role] = await Promise.all([this.targets.owner(member.name), this.targets.role(member.role)]);
+      if (user && role && !members.some((m) => m.name === user && m.role.id === role.id)) {
+        members.push({ name: user, role: { id: role.id } });
+      }
+    }
+    if (members.length === 0) {
+      return;
+    }
+    try {
+      await this.testops.setMembers(testCaseId, members);
+    } catch {
+      // Usually an unknown user; retry one by one so the valid members stay.
+      const valid: typeof members = [];
+      for (const member of members) {
+        try {
+          await this.testops.setMembers(testCaseId, [...valid, member]);
+          valid.push(member);
+        } catch {
+          this.targets.ownerMissing(member.name);
+        }
+      }
+    }
   }
 
   private async writeCustomFields(testCaseId: number, planned: Record<string, string[]>): Promise<void> {
@@ -175,17 +209,11 @@ export class TestOpsWriter {
   }
 
   private collectAttachments(planned: PlannedCase): PlannedAttachment[] {
-    const all: PlannedAttachment[] = [...planned.attachments];
-    for (const step of planned.scenario) {
-      if (step.type === "step") {
-        all.push(...step.attachments, ...step.dataAttachments, ...step.expectedAttachments);
-      }
-    }
-    return all;
+    return [...planned.attachments, ...stepAttachments(planned.scenario)];
   }
 
   /** Uploads attachments not yet present; returns planned key -> uploaded attachment. */
-  private async uploadAll(attachments: PlannedAttachment[], source: AttachmentSource, uploader: Uploader, log: WriteLog) {
+  private async uploadAll(attachments: PlannedAttachment[], source: CaseAttachments, uploader: Uploader, log: WriteLog) {
     const uploaded = new Map<string, ToAttachment>();
     for (const attachment of attachments) {
       await this.upload(attachment, source, uploader, uploaded, log);
@@ -197,7 +225,7 @@ export class TestOpsWriter {
 
   private async upload(
     attachment: PlannedAttachment,
-    source: AttachmentSource,
+    source: CaseAttachments,
     uploader: Uploader,
     uploaded: Map<string, ToAttachment>,
     log: WriteLog,
@@ -239,7 +267,7 @@ export class TestOpsWriter {
   private async scenarioSteps(
     steps: PlannedStep[],
     uploaded: Map<string, ToAttachment>,
-    linkedCaseIds: number[],
+    linkedCaseIds: string[],
     log: WriteLog,
   ): Promise<ToScenarioStep[]> {
     const attachmentSteps = (list: PlannedAttachment[]): ToScenarioStep[] =>
@@ -260,6 +288,9 @@ export class TestOpsWriter {
         continue;
       }
       const nested: ToScenarioStep[] = [...attachmentSteps(step.attachments)];
+      if (step.steps && step.steps.length > 0) {
+        nested.push(...(await this.scenarioSteps(step.steps, uploaded, linkedCaseIds, log)));
+      }
       if (step.data || step.dataAttachments.length > 0) {
         const dataAttachments = attachmentSteps(step.dataAttachments);
         nested.push({
@@ -297,17 +328,16 @@ export class TestOpsWriter {
   }
 
   private async migrateSharedStep(sourceId: number, log: WriteLog): Promise<number> {
-    const shared = await this.testrail.getSharedStep(sourceId);
+    const shared = await this.assets.sharedStep(sourceId);
     // Same naming as the previous migration tool, so earlier migrated shared steps are reused.
     const name = `${shared.title} [${shared.id}]`;
     const target = (await this.testops.findSharedStep(this.projectId, name)) ?? (await this.testops.createSharedStep(this.projectId, name));
-    const planned = separatedSteps(shared.custom_steps_separated ?? [], { format: this.profile.options.textFormat }, false);
+    const planned = shared.steps;
     const uploader: Uploader = {
       existing: () => this.testops.sharedStepAttachments(target.id),
       upload: (fileName, data, type) => this.testops.uploadSharedStepAttachment(target.id, fileName, data, type),
     };
-    const all = planned.flatMap((step) => (step.type === "step" ? [...step.attachments, ...step.dataAttachments, ...step.expectedAttachments] : []));
-    const uploaded = await this.uploadAll(all, new AttachmentSource(this.testrail, null), uploader, log);
+    const uploaded = await this.uploadAll(stepAttachments(planned), this.assets.attachments(null), uploader, log);
     await this.testops.clearSharedStepScenario(target.id);
     const steps = await this.scenarioSteps(planned, uploaded, [], log);
     if (steps.length > 0) {
@@ -316,6 +346,14 @@ export class TestOpsWriter {
     log("info", `Shared step "${name}" migrated.`);
     return target.id;
   }
+}
+
+function stepAttachments(steps: PlannedStep[]): PlannedAttachment[] {
+  return steps.flatMap((step) =>
+    step.type === "step"
+      ? [...step.attachments, ...step.dataAttachments, ...step.expectedAttachments, ...stepAttachments(step.steps ?? [])]
+      : [],
+  );
 }
 
 function attachmentKey(attachment: PlannedAttachment): string {

@@ -205,6 +205,10 @@ export class TestOpsClient {
     return page?.content?.[0] ?? null;
   }
 
+  getTestCase(testCaseId: number): Promise<ToTestCase> {
+    return this.http.get<ToTestCase>(`api/rs/testcase/${testCaseId}`);
+  }
+
   createTestCase(projectId: number, name: string): Promise<ToTestCase> {
     return this.http.json<ToTestCase>("POST", "api/rs/testcase", { body: { projectId, name } });
   }
@@ -229,11 +233,15 @@ export class TestOpsClient {
     return this.http.json("POST", `api/rs/testcase/${testCaseId}/issue`, { body: issues });
   }
 
-  /** Role -1 is the owner role on Allure TestOps. */
-  setOwner(testCaseId: number, username: string): Promise<unknown> {
-    return this.http.json("POST", `api/rs/testcase/${testCaseId}/members`, {
-      body: [{ name: username, role: { id: -1 } }],
-    });
+  /** Replaces the members of a test case. Role -1 is the owner role. */
+  setMembers(testCaseId: number, members: { name: string; role: { id: number } }[]): Promise<unknown> {
+    return this.http.json("POST", `api/rs/testcase/${testCaseId}/members`, { body: members });
+  }
+
+  /** Member roles such as Owner or Reviewer. */
+  async roles(): Promise<ToNamed[]> {
+    const response = await this.http.get<ToNamed[] | ToPage<ToNamed>>("api/rs/role");
+    return Array.isArray(response) ? response : (response?.content ?? []);
   }
 
   comments(testCaseId: number): Promise<ToComment[]> {

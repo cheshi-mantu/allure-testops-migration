@@ -127,7 +127,7 @@ describe("transformCase", () => {
     expect(planned.precondition).toBe("User exists\n![](testrail-attachment:77)");
     expect(planned.attachments).toEqual([{ sourceId: "77", fileName: "attachment-77" }]);
     expect(planned.links[0]).toEqual({ name: "TestRail C101", url: "https://tr.example/index.php?/cases/view/101" });
-    expect(linkedCaseIds).toEqual([55]);
+    expect(linkedCaseIds).toEqual(["55"]);
 
     expect(planned.scenario).toHaveLength(3);
     expect(planned.scenario[0]).toMatchObject({ type: "step", body: "Open page", expected: "Page open" });
