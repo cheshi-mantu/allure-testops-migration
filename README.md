@@ -9,6 +9,8 @@ Everything is configured in the browser: connect the systems, map the source str
 You need Docker with Compose.
 
 ```bash
+mkdir ato-migration
+cd ./ato-migration
 curl -O https://raw.githubusercontent.com/cheshi-mantu/allure-testops-migration/main/docker-compose.yml
 docker compose up -d
 ```
