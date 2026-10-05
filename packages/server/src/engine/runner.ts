@@ -15,7 +15,7 @@ import { TestOpsClient } from "../testops/client.js";
 import { discoverTestOps, requireTestOpsProject } from "../testops/discovery.js";
 import type { RunStore } from "../storage/runs.js";
 import { CaseSkipped } from "./errors.js";
-import { explain, fieldFor, KnownProblem, OperationFailed, ProblemCollector, serviceOf, type ProblemInput } from "./problems.js";
+import { explain, fieldFor, isTransient, KnownProblem, OperationFailed, ProblemCollector, serviceOf, type ProblemInput } from "./problems.js";
 import type { RetryInfo } from "../http/httpClient.js";
 import { TargetResolver } from "./targets.js";
 import { caseLabel, prepareSource, type PreparedSource, type SourceCase, type SourceDeps } from "./sources.js";
@@ -35,12 +35,14 @@ export class Run {
   private flushTimer: NodeJS.Timeout | null = null;
   private rateLimit: { limiter: RateLimiter; requests: number; waitedMs: number } | null = null;
   private readonly problems = new ProblemCollector();
+  /** Cases that failed on the server side and get a second attempt at the end. */
+  private readonly retried = new Set<string>();
 
   constructor(
     private readonly profile: Profile,
     dryRun: boolean,
     private readonly store: RunStore,
-    private readonly deps: SourceDeps,
+    private readonly deps: RunDeps,
   ) {
     this.summary = {
       id: `${new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14)}-${randomUUID().slice(0, 8)}`,
@@ -253,18 +255,32 @@ export class Run {
     const casesByKey = new Map(cases.map((c) => [c.key, c]));
     const migratedKeys = new Set<string>();
     const relink = new Set<string>();
+    const retry: SourceCase[] = [];
 
     await pool(cases, profile.options.concurrency, async (testCase) => {
       if (this.cancelled) {
         return;
       }
-      const ok = await this.migrateOne(testCase, source, writer);
+      const ok = await this.migrateOne(testCase, source, writer, retry);
       migratedKeys.add(testCase.key);
       if (ok && ok.linkedCaseIds.some((id) => casesByKey.has(id) && !migratedKeys.has(id))) {
         relink.add(testCase.key);
       }
     });
     this.checkCancelled();
+
+    if (retry.length > 0) {
+      // Server side failures often pass: try once more, one case at a time, after a pause.
+      this.phase(`Trying ${retry.length} case(s) again that failed because of server errors`);
+      await new Promise((resolve) => setTimeout(resolve, this.deps.retryPauseMs ?? RETRY_PAUSE_MS));
+      for (const testCase of retry) {
+        this.checkCancelled();
+        const ok = await this.migrateOne(testCase, source, writer, null);
+        if (ok && ok.linkedCaseIds.some((id) => casesByKey.has(id))) {
+          relink.add(testCase.key);
+        }
+      }
+    }
 
     if (relink.size > 0) {
       this.phase(`Updating links in ${relink.size} case(s) that point to cases migrated later`);
@@ -279,7 +295,12 @@ export class Run {
     }
   }
 
-  private async migrateOne(testCase: SourceCase, source: PreparedSource, writer: TestOpsWriter) {
+  /**
+   * `retryLater`: collects cases that failed on the server side instead of reporting them; null on the last attempt.
+   * A case counts as processed once, on its first attempt.
+   */
+  private async migrateOne(testCase: SourceCase, source: PreparedSource, writer: TestOpsWriter, retryLater: SourceCase[] | null) {
+    const firstAttempt = retryLater !== null || !this.retried.has(testCase.key);
     try {
       const where = caseLabel(testCase);
       const result = source.transform(testCase);
@@ -288,12 +309,19 @@ export class Run {
         problem ? this.report(level === "error" ? "error" : "warn", `${where}: ${message}`, problem, testCase) : this.log(level, `${where}: ${message}`, testCase.key),
       );
       this.summary.counters[written.created ? "created" : "updated"] += 1;
-      this.log("info", `${where}: ${written.created ? "created" : "updated"} "${result.planned.name}"`, testCase.key, written.testCaseId);
+      const again = this.retried.has(testCase.key) ? " on the second attempt" : "";
+      this.log("info", `${where}: ${written.created ? "created" : "updated"} "${result.planned.name}"${again}`, testCase.key, written.testCaseId);
       return result;
     } catch (error) {
       if (error instanceof CaseSkipped) {
         this.summary.counters.skipped += 1;
         this.report("warn", error.message, this.noteProblem(error.note), testCase);
+        return null;
+      }
+      if (retryLater && isTransient(error)) {
+        retryLater.push(testCase);
+        this.retried.add(testCase.key);
+        this.log("warn", `${caseLabel(testCase)}: "${testCase.title}" failed because of a server error (${errorMessage(error)}); it is tried again at the end of the run.`, testCase.key);
         return null;
       }
       this.summary.counters.failed += 1;
@@ -312,7 +340,9 @@ export class Run {
       );
       return null;
     } finally {
-      this.summary.counters.processed += 1;
+      if (firstAttempt) {
+        this.summary.counters.processed += 1;
+      }
       this.emitSummary();
     }
   }
@@ -541,6 +571,8 @@ export class Run {
 
 /** Values per custom field the dry run looks up in Allure TestOps. */
 const VALUE_CHECK_LIMIT = 200;
+/** Pause before the second attempt, so an overloaded server can recover. */
+const RETRY_PAUSE_MS = 5_000;
 
 /** Short summary of a planned case for the dry run log. */
 function describePlan(planned: PlannedCase): string {
@@ -573,12 +605,17 @@ function errorMessage(error: unknown): string {
 }
 
 /** Keeps track of runs; at most one active run per profile. */
+export interface RunDeps extends SourceDeps {
+  /** Pause before the second attempt of cases that failed on the server side; tests shorten it. */
+  retryPauseMs?: number;
+}
+
 export class RunManager {
   private readonly active = new Map<string, Run>();
 
   constructor(
     private readonly store: RunStore,
-    private readonly deps: SourceDeps,
+    private readonly deps: RunDeps,
   ) {}
 
   start(profile: Profile, dryRun: boolean): RunSummary {

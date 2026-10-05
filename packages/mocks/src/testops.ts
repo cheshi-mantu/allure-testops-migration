@@ -56,6 +56,11 @@ export interface TestOpsMockOptions {
   latencyMs?: number;
   /** Custom field values the fake refuses with 400, like a field locked to a list of values. */
   rejectedCustomFieldValues?: string[];
+  /**
+   * Requests that fail like an overloaded server: `times` matching requests get a 500 or the web page
+   * of the application instead of API data. The list is consumed, so tests can inspect what is left.
+   */
+  failures?: { method: string; path: RegExp; times: number; answer: 500 | "webPage" }[];
 }
 
 function pageOf<T>(items: T[], request: FastifyRequest) {
@@ -120,6 +125,13 @@ export function createTestOpsMock(options: TestOpsMockOptions = {}): { app: Fast
     }
     if (request.headers.authorization !== `Api-Token ${token}`) {
       return reply.status(401).send({ message: "Unauthorized" });
+    }
+    const failure = options.failures?.find((f) => f.times > 0 && f.method === request.method && f.path.test(request.url.split("?")[0]!));
+    if (failure) {
+      failure.times -= 1;
+      return failure.answer === 500
+        ? reply.status(500).send({ message: "An unexpected error occurred" })
+        : reply.status(200).type("text/html").send("<!doctype html><html><head><script>window.__APP__ = {};</script></head><body></body></html>");
     }
   });
 

@@ -26,6 +26,8 @@ interface Uploader {
 export class TestOpsWriter {
   /** Source case key -> Allure TestOps test case id, filled as cases are migrated. */
   private readonly migrated = new Map<string, number>();
+  /** Source case keys whose Allure TestOps case this run created, also when a later step failed. */
+  private readonly created = new Set<string>();
   private readonly sharedSteps = new Map<number, Promise<number | null>>();
 
   constructor(
@@ -94,6 +96,14 @@ export class TestOpsWriter {
       }
       return byId;
     }
+    // A second attempt after a failure: the case may exist without its tag yet.
+    const known = this.migrated.get(planned.sourceId);
+    if (known !== undefined) {
+      const byKnownId = await this.testops.getTestCase(known).catch(() => null);
+      if (byKnownId && !byKnownId.deleted) {
+        return byKnownId;
+      }
+    }
     return this.op("find the test case", () => this.testops.findTestCaseByTag(this.projectId, `${this.tagPrefix}:${planned.sourceId}`));
   }
 
@@ -101,6 +111,9 @@ export class TestOpsWriter {
     const existing = await this.findTarget(planned);
     const testCase = existing ?? (await this.op("create the test case", () => this.testops.createTestCase(this.projectId, planned.name)));
     this.migrated.set(planned.sourceId, testCase.id);
+    if (!existing) {
+      this.created.add(planned.sourceId);
+    }
 
     // Tags first: they make the case findable on rerun even if a later step fails.
     await this.op("set tags", () => this.testops.setTags(testCase.id, planned.tags));
@@ -197,7 +210,7 @@ export class TestOpsWriter {
         await this.testops.setScenario(testCase.id, steps);
       }
     });
-    return { testCaseId: testCase.id, created: existing === null };
+    return { testCaseId: testCase.id, created: this.created.has(planned.sourceId) };
   }
 
   private userMissing(name: string, isOwner: boolean, log: WriteLog) {

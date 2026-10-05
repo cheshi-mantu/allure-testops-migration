@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { newProfile } from "@atm/shared";
 import { HttpError } from "../http/httpClient.js";
-import { explain, OperationFailed, ProblemCollector, serverMessage } from "./problems.js";
+import { explain, isTransient, OperationFailed, ProblemCollector, serverMessage } from "./problems.js";
 
 const profile = newProfile("p", "p", new Date(), "csv");
 profile.testops.scope.projectId = 7;
@@ -49,6 +49,23 @@ describe("explain", () => {
   it("suggests fewer parallel cases when rate limited or overloaded", () => {
     expect(explain(http(429), "set tags", context).fix).toEqual({ step: "options" });
     expect(explain(http(503), "set tags", context).fix).toEqual({ step: "options" });
+  });
+
+  it("explains a web page answer the same way for every operation, not as a refused value", () => {
+    const page = new HttpError("POST https://testops.example/api/rs/testcase/1/cfv was answered with a web page (200) instead of API data", 200, "u", "", true);
+    const e = explain(new OperationFailed("set custom fields", page), "set custom fields", context);
+    expect(e.title).toBe("Allure TestOps answered with a web page instead of API data.");
+    expect(e.key).toBe(explain(page, "find the test case", context).key);
+    expect(e.hint).toMatch(/tried again at the end of the run/);
+    expect(e.detail).not.toMatch(/<|window/);
+  });
+
+  it("tells server side failures from refused requests", () => {
+    expect(isTransient(new OperationFailed("create the test case", http(500)))).toBe(true);
+    expect(isTransient(new HttpError("x", 200, "u", "", true))).toBe(true);
+    expect(isTransient(new HttpError("x", 0, "u", ""))).toBe(true);
+    expect(isTransient(http(400))).toBe(false);
+    expect(isTransient(http(403))).toBe(false);
   });
 
   it("reads messages from JSON and HTML error pages", () => {
