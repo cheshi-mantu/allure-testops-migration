@@ -93,6 +93,18 @@ export interface Explanation {
   key: string;
 }
 
+/**
+ * Failures on the server side that often pass: internal errors, overload, a web page instead of API data,
+ * timeouts and lost connections. The same request may work a little later.
+ */
+export function isTransient(error: unknown): boolean {
+  const cause = error instanceof OperationFailed ? error.reason : error;
+  if (cause instanceof HttpError) {
+    return cause.notApi || cause.status === 0 || cause.status === 429 || cause.status >= 500;
+  }
+  return cause instanceof Error && (cause.name === "TimeoutError" || /timed out|timeout/i.test(cause.message));
+}
+
 /** The message Allure TestOps (or TestRail) put into an error response, if any. */
 export function serverMessage(error: unknown): string | undefined {
   if (!(error instanceof HttpError) || !error.body) {
@@ -134,6 +146,15 @@ export function explain(error: unknown, operation: Operation, context: ExplainCo
   const key = (suffix: string) => `failed:${operation}:${suffix}`;
   const fieldMatching = (match: (target: FieldTarget) => boolean): FixLink => ({ step: "fields", field: fieldFor(profile, match) });
 
+  if (cause instanceof HttpError && cause.notApi) {
+    return {
+      key: "server:not-api",
+      title: `${service} answered with a web page instead of API data.`,
+      hint: `The request did not reach the ${service} API: the server or a proxy in front of it could not route it, which happens when the server is overloaded or restarting. Such cases are tried again at the end of the run. If they still fail, lower "Cases migrated in parallel" on the Options step and run again: migrated cases are updated, not duplicated. If it keeps happening, send the downloaded log to the ${service} administrator.`,
+      fix: { step: "options" },
+      detail,
+    };
+  }
   if (status === 0) {
     const tls = /tls|certificate/i.test(detail);
     return {
@@ -183,7 +204,7 @@ export function explain(error: unknown, operation: Operation, context: ExplainCo
     return {
       key: key("server"),
       title: status >= 500 ? `${service} failed with an internal error (${status}).` : `${service} did not answer in time.`,
-      hint: `This is a problem on the ${service} side, often under load. Run the migration again; if it repeats, lower "Cases migrated in parallel" on the Options step and send the downloaded log to the ${service} administrator.`,
+      hint: `This is a problem on the ${service} side, often under load. Such cases are tried again at the end of the run. If they still fail, lower "Cases migrated in parallel" on the Options step and run again: migrated cases are updated, not duplicated. If it repeats, send the downloaded log to the ${service} administrator.`,
       fix: { step: "options" },
       detail,
     };

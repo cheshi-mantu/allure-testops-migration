@@ -7,6 +7,8 @@ export class HttpError extends Error {
     readonly status: number,
     readonly url: string,
     readonly body: string,
+    /** The server answered an API request with a web page: the request did not reach the API. */
+    readonly notApi = false,
   ) {
     super(message);
     this.name = "HttpError";
@@ -42,6 +44,8 @@ export interface RetryInfo {
 export type Query = Record<string, string | number | boolean | undefined | null>;
 
 const RETRY_STATUSES = new Set([429, 502, 503, 504]);
+/** Reading is safe to repeat after an internal error; writing could be applied twice. */
+const RETRY_READ_STATUSES = new Set([500]);
 const MAX_RETRY_DELAY_MS = 120_000;
 
 export function withTrailingSlash(url: string): string {
@@ -95,7 +99,7 @@ export class HttpClient {
       init.headers = { ...init.headers, "Content-Type": "application/json" } as Record<string, string>;
       init.body = JSON.stringify(options.body);
     }
-    const response = await this.send(this.url(path, options.query), init);
+    const response = await this.send(this.url(path, options.query), init, true);
     const text = await response.text();
     if (!text) {
       return undefined as T;
@@ -103,6 +107,9 @@ export class HttpClient {
     try {
       return JSON.parse(text) as T;
     } catch {
+      if (looksLikeHtml(text)) {
+        throw notApiError(method, response.url || this.url(path, options.query), response.status);
+      }
       throw new HttpError(`Expected JSON from ${describe(response.url)} but got something else`, response.status, response.url, text.slice(0, 500));
     }
   }
@@ -125,12 +132,13 @@ export class HttpClient {
         form.append(file.field, new Blob([new Uint8Array(file.data)], { type: file.contentType }), file.name);
       }
       return { method: "POST", body: form, headers: { Accept: "application/json" } };
-    });
+    }, true);
     const text = await response.text();
     return (text ? JSON.parse(text) : undefined) as T;
   }
 
-  private async send(url: string, init: RequestInit | (() => RequestInit)): Promise<Response> {
+  /** `expectJson`: an HTML answer means the request never reached the API, so it is repeated like a 503. */
+  private async send(url: string, init: RequestInit | (() => RequestInit), expectJson = false): Promise<Response> {
     let attempt = 0;
     for (;;) {
       const base = typeof init === "function" ? init() : init;
@@ -158,10 +166,23 @@ export class HttpClient {
         }
         throw new HttpError(`Cannot reach ${describe(url)}: ${networkReason(error)}`, 0, url, "");
       }
+      const method = (base.method ?? "GET").toUpperCase();
+      if (response.ok && expectJson && (response.headers.get("content-type") ?? "").includes("text/html")) {
+        await response.body?.cancel();
+        if (attempt < this.retries) {
+          const delay = backoff(attempt);
+          this.onRetry?.({ url: describe(url), attempt: attempt + 1, of: this.retries, reason: "answered with a web page instead of API data", delayMs: delay });
+          await this.sleep(delay);
+          attempt += 1;
+          continue;
+        }
+        throw notApiError(method, url, response.status);
+      }
       if (response.ok) {
         return response;
       }
-      if (RETRY_STATUSES.has(response.status) && attempt < this.retries) {
+      const retryable = RETRY_STATUSES.has(response.status) || (method === "GET" && RETRY_READ_STATUSES.has(response.status));
+      if (retryable && attempt < this.retries) {
         await response.body?.cancel();
         const delay = retryAfter(response) ?? backoff(attempt);
         if (response.status === 429) {
@@ -183,6 +204,14 @@ export class HttpClient {
       throw new HttpError(`${base.method ?? "GET"} ${describe(url)} failed with ${response.status}${errorDetail(body)}`, response.status, url, body.slice(0, 2000));
     }
   }
+}
+
+function looksLikeHtml(text: string): boolean {
+  return /^\s*(<!doctype html|<html|<head|<script|<meta)/i.test(text) || text.includes("window.__");
+}
+
+function notApiError(method: string, url: string, status: number): HttpError {
+  return new HttpError(`${method} ${describe(url)} was answered with a web page (${status}) instead of API data`, status, url, "", true);
 }
 
 function backoff(attempt: number): number {
