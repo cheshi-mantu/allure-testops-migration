@@ -52,6 +52,7 @@ packages/
   server/src/http/          HttpClient, RateLimiter
   server/src/testops/       Allure TestOps client and project discovery
   server/src/testrail/      TestRail client, discovery, field and section handling
+  server/src/xray/          Xray Cloud (GraphQL) and Jira Cloud (REST v3) clients, field catalog, wiki markup, transform, discovery
   server/src/csv/           CSV reading, column suggestions, grouping rows into cases, step parsing, transform
   server/src/convert/       TestRail case to PlannedCase (pure), text and markup conversion
   server/src/engine/        sources, runner (dry run and migration), writer, target lookups, problems
@@ -85,7 +86,9 @@ interface PreparedSource<C extends SourceCase> {
 
 `PlannedCase` (`shared/src/api.ts`) is the source-neutral description of one Allure TestOps test case: `sourceId`, `sourceUrl`, optional `allureId` (update this existing case), `name`, `description`, `precondition`, `expectedResult` (Markdown), `tags`, `customFields` (field name to values), `layer`, `status`, `owner`, `members` (`{ name, role }`), `links`, `issues` (`{ key, integrationId }`), `comments`, `attachments`, `scenario` (`PlannedStep[]`: steps with nested steps, data, expected result and attachments, or a shared step reference), `notes`.
 
-### Adding a new source (for example Zephyr, Xray, qTest, TestLink, Azure Test Plans)
+### Adding a new source (for example Zephyr, qTest, TestLink, Azure Test Plans)
+
+The Xray Cloud source (`server/src/xray`) is the most complete example: two systems behind one source (Jira for the issue, Xray for the test details), a field catalog that turns every attribute into a mappable field with values and examples, conversion of the source markup, attachments from two places, and called tests as shared steps.
 
 1. `shared/src/profile.ts`: add the source to `SOURCES`, a connection schema (mark secret fields in `SECRET_PATHS`), a scope schema, and default options in `shared/src/defaults.ts` (for example a migration tag prefix named after the source).
 2. `server/src/<source>/client.ts`: a client on top of `HttpClient` with the source's paging, auth and a `RateLimiter` if the source limits requests. Report waits through `onRetry` so long pauses show in the run log.
@@ -195,4 +198,5 @@ Step bodies are plain text; `description`, `precondition`, `expectedResult` and 
 - Unit tests next to the code (`*.test.ts`), end-to-end tests in `packages/server/test`. Run everything with `npm test` from the root.
 - `createTestOpsMock()` from `@atm/mocks` serves the subset of the Allure TestOps API listed above and keeps its state in memory (`state.testCases`, `state.customFields`, ...). Options: `latencyMs`, `rejectedCustomFieldValues` (400 for these values), `failures` (answer matching requests with 500 or with an HTML page a given number of times).
 - An end-to-end test for a source should: migrate a synthetic project, check the written cases field by field, run again and expect only updates, and run once with injected failures expecting no duplicates.
-- Test the UI against the fake servers (`npm run dev:mocks` and `npm run dev:server`): fake TestRail user `demo@example.com` with API key `demo-api-key`, fake Allure TestOps token `demo-api-token`.
+- `createXrayMock()` serves Jira Cloud REST v3 and the Xray Cloud GraphQL API on one port, with a project of Manual, Cucumber and Generic tests, a called test, folders, preconditions, sets, plans, comments, links and attachments. Search pages hold two issues, so paging is always exercised.
+- Test the UI against the fake servers (`npm run dev:mocks` and `npm run dev:server`): fake TestRail user `demo@example.com` with API key `demo-api-key`, fake Allure TestOps token `demo-api-token`, fake Jira and Xray on port 4003 (`demo@example.com` / `demo-jira-token`, Xray `demo-client-id` / `demo-client-secret`).

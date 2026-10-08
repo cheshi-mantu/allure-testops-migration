@@ -135,6 +135,9 @@ function StructureEditor() {
   const discovery = testrail.data!;
   const structure = profile.structure;
   const csv = profile.source === "csv";
+  const xray = profile.source === "xray";
+  /** What a node of the hierarchy is called in the source. */
+  const node = xray ? "folder" : "section";
   const mappedCount = structure.levels.length;
   const multiSuite = discovery.suites.length > 1;
 
@@ -164,7 +167,7 @@ function StructureEditor() {
     <Stack>
       <Group justify="space-between">
         <Text c="dimmed" maw={720}>
-          Every nesting level of {csv ? "the section path" : "TestRail sections"} becomes its own custom field in Allure TestOps, so you
+          Every nesting level of {csv ? "the section path" : xray ? "the Xray test repository folders" : "TestRail sections"} becomes its own custom field in Allure TestOps, so you
           can build a tree like <i>Epic → Feature → Story</i> instead of generic <i>Section1, Section2</i> fields.
         </Text>
         <RefreshButton />
@@ -178,8 +181,10 @@ function StructureEditor() {
           <Group justify="space-between">
             <Title order={4}>Detected structure</Title>
             <Group gap="xs">
-              {!csv && <Badge variant="light">{discovery.suites.length} suite(s)</Badge>}
-              <Badge variant="light">{discovery.structure.reduce((sum, s) => sum + s.sectionCount, 0)} sections</Badge>
+              {profile.source === "testrail" && <Badge variant="light">{discovery.suites.length} suite(s)</Badge>}
+              <Badge variant="light">
+                {discovery.structure.reduce((sum, s) => sum + s.sectionCount, 0)} {node}s{xray ? ` in ${discovery.sampledCases} sampled test(s)` : ""}
+              </Badge>
               <Badge variant="light" color="grape">
                 up to {discovery.maxDepth} level(s) deep
               </Badge>
@@ -187,7 +192,11 @@ function StructureEditor() {
           </Group>
           {discovery.maxDepth === 0 && (
             <Alert color="blue">
-              {csv ? "The path column is empty in every row." : "The selected suites have no sections; only the suite can be mapped."}
+              {csv
+                ? "The path column is empty in every row."
+                : xray
+                  ? "The sampled tests are not in folders of the test repository; nothing to map here."
+                  : "The selected suites have no sections; only the suite can be mapped."}
             </Alert>
           )}
           {discovery.structure.length > 1 && (
@@ -238,7 +247,7 @@ function StructureEditor() {
           <Stack>
             <Group justify="space-between" align="flex-end">
               <div>
-                <Title order={4}>Section levels</Title>
+                <Title order={4}>{xray ? "Folder levels" : "Section levels"}</Title>
                 <Text size="sm" c="dimmed">
                   Choose a custom field for each level. Leave a level empty to skip it.
                 </Text>
@@ -256,7 +265,7 @@ function StructureEditor() {
               <Table.Thead>
                 <Table.Tr>
                   <Table.Th w={70}>Level</Table.Th>
-                  <Table.Th>Sections found</Table.Th>
+                  <Table.Th>{xray ? "Folders found" : "Sections found"}</Table.Th>
                   <Table.Th w="38%">Allure TestOps custom field</Table.Th>
                 </Table.Tr>
               </Table.Thead>
@@ -274,7 +283,7 @@ function StructureEditor() {
                       <Table.Td>
                         <Text size="sm">{level.examples.join(", ")}</Text>
                         <Text size="xs" c="dimmed">
-                          {level.sectionCount} section(s){level.caseCount ? `, ${level.caseCount} sampled case(s) directly here` : ""}
+                          {level.sectionCount} {node}(s){level.caseCount ? `, ${level.caseCount} sampled ${xray ? "test" : "case"}(s) directly here` : ""}
                         </Text>
                       </Table.Td>
                       <Table.Td>
@@ -302,7 +311,7 @@ function StructureEditor() {
             </Table>
             {mappedCount < discovery.maxDepth && (
               <Radio.Group
-                label={`Sections deeper than level ${mappedCount}`}
+                label={`${xray ? "Folders" : "Sections"} deeper than level ${mappedCount}`}
                 value={structure.deeperLevels}
                 onChange={(value) => update((p) => void (p.structure.deeperLevels = value as "join" | "drop"))}
               >
@@ -333,7 +342,7 @@ function StructureEditor() {
           <Title order={4}>Tree</Title>
           <Switch
             label="Create an Allure TestOps tree from these fields"
-            description={`The tree shows migrated cases grouped the same way as in ${csv ? "the file" : "TestRail"}. An existing tree with the same name is kept as is.`}
+            description={`The tree shows migrated cases grouped the same way as in ${csv ? "the file" : xray ? "Xray" : "TestRail"}. An existing tree with the same name is kept as is.`}
             checked={structure.createTree}
             onChange={(e) => {
               const value = e.currentTarget.checked;
@@ -383,7 +392,7 @@ function StructureEditor() {
           <Table verticalSpacing="xs">
             <Table.Thead>
               <Table.Tr>
-                <Table.Th>{csv ? "Path in the file" : "TestRail"}</Table.Th>
+                <Table.Th>{csv ? "Path in the file" : xray ? "Xray folder" : "TestRail"}</Table.Th>
                 <Table.Th>Allure TestOps custom fields</Table.Th>
               </Table.Tr>
             </Table.Thead>

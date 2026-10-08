@@ -37,12 +37,13 @@ function targetNotes(planned: PlannedCase, profile: Profile, testops: TestOpsDis
     });
   }
   if (testops.users) {
-    const known = new Set(testops.users.map((u) => u.username));
+    // Same lookup as the migration: by user name, or by email.
+    const known = new Set(testops.users.flatMap((u) => [u.username, ...(u.email ? [u.email.toLowerCase()] : [])]));
     const people = [
       ...(planned.owner ? [{ name: planned.owner, owner: true, role: undefined }] : []),
       ...planned.members.map((m) => ({ name: m.name, owner: false, role: m.role })),
     ];
-    for (const person of people.filter((p) => !known.has(p.name))) {
+    for (const person of people.filter((p) => !known.has(p.name) && !known.has(p.name.toLowerCase()))) {
       notes.push({
         code: "user-missing",
         text: `"${person.name}" is not an Allure TestOps user, so it would not be set as ${person.owner ? "owner" : "member"}.`,
@@ -72,7 +73,7 @@ function Attachments({ list }: { list: PlannedAttachment[] }) {
     <Group gap={4}>
       {list.map((a) => (
         <Badge key={`${a.sourceId}-${a.fileName}`} size="xs" variant="light" color="gray" leftSection={<IconPaperclip size={10} />} tt="none">
-          {a.sourceId === null ? a.fileName : `TestRail attachment ${a.sourceId}`}
+          {a.sourceId === null || !/^attachment-/.test(a.fileName) ? a.fileName : `Attachment ${a.sourceId}`}
         </Badge>
       ))}
     </Group>
@@ -141,11 +142,14 @@ function Preview() {
   const { profile, source: testrail, testops, flush } = useProfile();
   const samples = testrail.data?.sampleCaseIds ?? [];
   const csv = profile.source === "csv";
-  const labelOf = (s: { id: string; name: string }) => (csv ? `${s.name} [${s.id}]` : `C${s.id}: ${s.name}`);
+  const xray = profile.source === "xray";
+  const labelOf = (s: { id: string; name: string }) => (csv ? `${s.name} [${s.id}]` : xray ? `${s.id}: ${s.name}` : `C${s.id}: ${s.name}`);
   const labels = new Map(samples.map((s) => [labelOf(s), s.id]));
   const [query, setQuery] = useState(samples[0] ? labelOf(samples[0]) : "");
   // A picked sample, a typed TestRail id (C123) or, for CSV, a typed case id or name.
-  const caseId = labels.get(query) ?? (csv ? query.trim() || null : (/^\s*C?(\d+)/i.exec(query)?.[1] ?? null));
+  const caseId =
+    labels.get(query) ??
+    (csv ? query.trim() || null : xray ? (/^\s*([A-Z][A-Z0-9_]*-\d+)/i.exec(query)?.[1]?.toUpperCase() ?? null) : (/^\s*C?(\d+)/i.exec(query)?.[1] ?? null));
   const preview = useMutation({
     mutationFn: async (id: string) => {
       await flush();
@@ -165,13 +169,15 @@ function Preview() {
   return (
     <Stack>
       <Text c="dimmed">
-        Converts one {csv ? "case of the file" : "TestRail case"} with the current settings and shows what will be written. Nothing is
+        Converts one {csv ? "case of the file" : xray ? "Xray test" : "TestRail case"} with the current settings and shows what will be written. Nothing is
         changed in Allure TestOps.
       </Text>
       <Group align="flex-end">
         <Autocomplete
-          label={csv ? "Case" : "TestRail case"}
-          description={csv ? "Pick a case or type its id or name." : "Pick from the sample or type a case id, e.g. C1234."}
+          label={csv ? "Case" : xray ? "Xray test" : "TestRail case"}
+          description={
+            csv ? "Pick a case or type its id or name." : xray ? "Pick from the sample or type an issue key, e.g. CALC-12." : "Pick from the sample or type a case id, e.g. C1234."
+          }
           w={460}
           data={[...labels.keys()]}
           value={query}
@@ -204,7 +210,7 @@ function Preview() {
               <Title order={4}>{planned.name}</Title>
               {planned.sourceUrl && (
                 <Anchor href={planned.sourceUrl} target="_blank" size="sm">
-                  Open in TestRail
+                  Open in {xray ? "Jira" : "TestRail"}
                 </Anchor>
               )}
             </Group>
@@ -278,7 +284,9 @@ function Preview() {
                 <Row label="Attachments">
                   {planned.attachments.length ? <Attachments list={planned.attachments} /> : <Text c="dimmed">Inline: none</Text>}
                   <Text size="xs" c="dimmed">
-                    Other files attached to the case in TestRail are migrated too.
+                    {xray
+                      ? "Files of Xray steps and other files attached to the Jira issue are migrated too."
+                      : "Other files attached to the case in TestRail are migrated too."}
                   </Text>
                 </Row>
                 )}

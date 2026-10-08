@@ -80,7 +80,7 @@ export function ProfilesPage() {
           <Stack align="center" gap="xs">
             <Title order={4}>No profiles yet</Title>
             <Text c="dimmed" ta="center" maw={520}>
-              Create a profile to migrate from TestRail or a CSV file: map structure and fields using the real data, preview the result
+              Create a profile to migrate from TestRail, Xray Cloud or a CSV file: map structure and fields using the real data, preview the result
               and run the migration. Or import a profile exported on another machine.
             </Text>
             <Button mt="sm" leftSection={<IconPlus size={16} />} onClick={() => setCreating(true)}>
@@ -99,7 +99,12 @@ export function ProfilesPage() {
               {profile.lastRun ? <RunStatusBadge run={profile.lastRun} /> : <Badge variant="light" color="gray">Not run</Badge>}
             </Group>
             <Text size="sm" c="dimmed" truncate>
-              From: {profile.source === "csv" ? `CSV ${profile.fileName ? `"${profile.fileName}"` : "file not chosen"}` : profile.testrailEndpoint || "not set"}
+              From:{" "}
+              {profile.source === "csv"
+                ? `CSV ${profile.fileName ? `"${profile.fileName}"` : "file not chosen"}`
+                : profile.source === "xray"
+                  ? `Xray project ${profile.xrayProject || "not chosen"}`
+                  : profile.testrailEndpoint || "not set"}
             </Text>
             <Text size="sm" c="dimmed" truncate>
               To: {profile.testopsEndpoint || "not set"}
@@ -126,12 +131,17 @@ export function ProfilesPage() {
                 const next = value as SourceType;
                 setSource(next);
                 if (!nameTouched) {
-                  setName(next === "csv" ? "CSV import" : "TestRail migration");
+                  setName(next === "csv" ? "CSV import" : next === "xray" ? "Xray migration" : "TestRail migration");
                 }
               }}
             >
               <Stack gap="xs" mt="xs">
                 <Radio value="testrail" label="TestRail" description="Reads projects, suites, sections, fields, shared steps and attachments through the TestRail API." />
+                <Radio
+                  value="xray"
+                  label="Xray Cloud"
+                  description="Reads Xray tests of a Jira Cloud project: steps, Cucumber and generic definitions, folders, preconditions, test sets and plans, and every Jira field."
+                />
                 <Radio
                   value="csv"
                   label="CSV file"

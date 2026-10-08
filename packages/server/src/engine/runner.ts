@@ -54,7 +54,7 @@ export class Run {
       counters: { total: 0, processed: 0, created: 0, updated: 0, failed: 0, skipped: 0 },
       phase: "Starting",
       error: null,
-      context: runContext(profile, profile.source === "csv" ? "CSV file" : `TestRail project #${profile.testrail.scope.projectId ?? "?"}`),
+      context: runContext(profile, sourceLabelOf(profile)),
     };
   }
 
@@ -211,7 +211,7 @@ export class Run {
       }
     }
     const log = (level: "info" | "warn", message: string, caseId?: string) => this.log(level, message, caseId);
-    this.phase(profile.source === "csv" ? "Reading the CSV file" : "Connecting to TestRail");
+    this.phase(profile.source === "csv" ? "Reading the CSV file" : profile.source === "xray" ? "Connecting to Jira and Xray" : "Connecting to TestRail");
     if (profile.source === "testrail") {
       const perMinute = testRailRequestsPerMinute(profile.testrail.connection);
       if (perMinute === null) {
@@ -224,7 +224,7 @@ export class Run {
     }
     const retryLog = (service: string) => (info: RetryInfo) =>
       this.log("warn", `${service}: ${info.url} failed (${info.reason}); retry ${info.attempt} of ${info.of} in ${Math.max(1, Math.round(info.delayMs / 1000))}s.`);
-    const source = await prepareSource(profile, this.deps, log, retryLog("TestRail"));
+    const source = await prepareSource(profile, this.deps, log, retryLog(profile.source === "xray" ? "Jira or Xray" : "TestRail"));
 
     this.phase("Connecting to Allure TestOps");
     const projectId = requireTestOpsProject(profile);
@@ -471,10 +471,11 @@ export class Run {
       }
     }
     if (target.users) {
-      const known = new Set(target.users.map((user) => user.username));
+      // Same lookup as the migration: by user name, or by email.
+      const known = new Set(target.users.flatMap((user) => [user.username, ...(user.email ? [user.email.toLowerCase()] : [])]));
       for (const [map, isOwner] of [[owners, true], [members, false]] as const) {
         for (const [name, affected] of map) {
-          if (known.has(name)) {
+          if (known.has(name) || known.has(name.toLowerCase())) {
             continue;
           }
           for (const testCase of affected) {
@@ -509,6 +510,12 @@ export class Run {
     if (this.profile.structure.createTree && this.structureFieldNames().length > 0) {
       const exists = target.trees.some((tree) => tree.name === this.profile.structure.treeName);
       this.log("info", exists ? `Tree "${this.profile.structure.treeName}" already exists and is kept.` : `Tree "${this.profile.structure.treeName}" will be created.`);
+    }
+    if (this.profile.source === "xray") {
+      this.log(
+        "info",
+        `${sharedSteps.size} called test(s) ${this.profile.options.migrateSharedSteps ? "become shared steps" : "are copied into the tests that call them"}; ${attachments} image(s) in Jira text; files of steps and issues are migrated too.`,
+      );
     }
     if (source.testrail) {
       this.log("info", `${sharedSteps.size} shared step(s) and ${attachments} inline attachment(s) are referenced; attachments of cases are migrated too.`);
@@ -571,6 +578,20 @@ export class Run {
 
 /** Values per custom field the dry run looks up in Allure TestOps. */
 const VALUE_CHECK_LIMIT = 200;
+
+/** The source of a run for people, until the run knows better (e.g. the file name). */
+function sourceLabelOf(profile: Profile): string {
+  switch (profile.source) {
+    case "csv":
+      return "CSV file";
+    case "xray": {
+      const jql = profile.xray.scope.jql.trim();
+      return `Xray project ${profile.xray.scope.projectKey || "?"}${jql ? ` (${jql})` : ""}`;
+    }
+    default:
+      return `TestRail project #${profile.testrail.scope.projectId ?? "?"}`;
+  }
+}
 /** Pause before the second attempt, so an overloaded server can recover. */
 const RETRY_PAUSE_MS = 5_000;
 

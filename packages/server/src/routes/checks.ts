@@ -2,9 +2,11 @@ import type { ConnectionCheck, NamedId, Profile } from "@atm/shared";
 import { HttpError } from "../http/httpClient.js";
 import { TestOpsClient } from "../testops/client.js";
 import { TestRailClient } from "../testrail/client.js";
+import { JiraClient, XrayClient } from "../xray/client.js";
 
 export interface CheckResult extends ConnectionCheck {
-  projects: NamedId[];
+  /** `key` for Jira projects. */
+  projects: (NamedId & { key?: string })[];
 }
 
 function explain(error: unknown, service: string): string {
@@ -17,6 +19,9 @@ function explain(error: unknown, service: string): string {
     }
     if (error.status === 404) {
       return `${service} was not found at this address. Check the URL.`;
+    }
+    if (error.notApi) {
+      return `${service} answered with a web page instead of API data. Check the URL: it must be the address of ${service} itself.`;
     }
     return error.message;
   }
@@ -38,6 +43,44 @@ export async function checkTestRail(profile: Profile): Promise<CheckResult> {
   } catch (error) {
     return { ok: false, message: explain(error, "TestRail"), projects: [] };
   }
+}
+
+/** Xray API key and Jira account; returns the Jira projects the account can see. */
+export async function checkXray(profile: Profile): Promise<CheckResult> {
+  const connection = profile.xray.connection;
+  if (!connection.jiraUrl || !connection.jiraEmail || !connection.jiraApiToken) {
+    return { ok: false, message: "Enter the Jira site, the email and the API token.", projects: [] };
+  }
+  if (!connection.clientId || !connection.clientSecret) {
+    return { ok: false, message: "Enter the Xray API key: client id and client secret.", projects: [] };
+  }
+  const jira = new JiraClient(connection);
+  let user: string;
+  let projects: { id: string; key: string; name: string }[];
+  try {
+    const me = await jira.myself();
+    user = me.displayName ?? me.emailAddress ?? connection.jiraEmail;
+    projects = await jira.projects();
+  } catch (error) {
+    return { ok: false, message: explain(error, "Jira"), projects: [] };
+  }
+  try {
+    await new XrayClient(connection).authenticate();
+  } catch (error) {
+    const hint =
+      error instanceof HttpError && (error.status === 401 || error.status === 400)
+        ? "Xray rejected the API key. Check the client id and secret, and that the Xray region matches the Jira site."
+        : explain(error, "Xray");
+    return { ok: false, message: `Jira works (as ${user}), but ${hint}`, projects: [] };
+  }
+  return {
+    ok: true,
+    message: `Connected to Jira as ${user} and to Xray. ${projects.length} project(s) available.`,
+    details: user,
+    projects: projects
+      .map((p) => ({ id: Number(p.id), key: p.key, name: `${p.name} (${p.key})` }))
+      .sort((a, b) => a.name.localeCompare(b.name)),
+  };
 }
 
 export async function checkTestOps(profile: Profile): Promise<CheckResult> {

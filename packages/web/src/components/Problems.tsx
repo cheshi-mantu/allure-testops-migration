@@ -6,24 +6,26 @@ import type { FixLink, PlannedNote, Profile, RunProblem } from "@atm/shared";
 import { ApiError, errorText } from "../api/client";
 import { useProfile } from "./ProfileContext";
 
-const STEP_LABELS: Record<FixLink["step"], { testrail: string; csv: string }> = {
-  connections: { testrail: "Connections", csv: "Connection" },
-  file: { testrail: "CSV file", csv: "CSV file" },
-  scope: { testrail: "Projects", csv: "Project" },
-  structure: { testrail: "Suites & sections", csv: "Sections" },
-  fields: { testrail: "Fields", csv: "Columns" },
-  options: { testrail: "Options", csv: "Options" },
+const STEP_LABELS: Record<FixLink["step"], Record<Profile["source"], string>> = {
+  connections: { testrail: "Connections", csv: "Connection", xray: "Connections" },
+  file: { testrail: "CSV file", csv: "CSV file", xray: "CSV file" },
+  scope: { testrail: "Projects", csv: "Project", xray: "Projects" },
+  structure: { testrail: "Suites & sections", csv: "Sections", xray: "Folders" },
+  fields: { testrail: "Fields", csv: "Columns", xray: "Fields" },
+  options: { testrail: "Options", csv: "Options", xray: "Options" },
 };
 
-export function fixLabel(profile: Profile, fix: FixLink): string {
+/** "Fields: Priority": the step and, when known, the field label instead of its system name. */
+export function fixLabel(profile: Profile, fix: FixLink, labelOf: (systemName: string) => string | undefined = () => undefined): string {
   const step = STEP_LABELS[fix.step][profile.source];
-  return fix.field ? `${step}: ${fix.field}` : step;
+  return fix.field ? `${step}: ${labelOf(fix.field) ?? fix.field}` : step;
 }
 
 /** Opens the step (and field) where the problem is fixed. */
 export function FixButton({ fix, size = "xs" }: { fix: FixLink; size?: "xs" | "compact-sm" }) {
-  const { profile } = useProfile();
+  const { profile, source } = useProfile();
   const navigate = useNavigate();
+  const labelOf = (systemName: string) => source.data?.fields.find((f) => f.systemName === systemName)?.label;
   return (
     <Button
       size={size}
@@ -31,7 +33,7 @@ export function FixButton({ fix, size = "xs" }: { fix: FixLink; size?: "xs" | "c
       rightSection={<IconArrowRight size={14} />}
       onClick={() => navigate(`/profiles/${profile.id}/${fix.step}${fix.field ? `?field=${encodeURIComponent(fix.field)}` : ""}`)}
     >
-      Fix in {fixLabel(profile, fix)}
+      Fix in {fixLabel(profile, fix, labelOf)}
     </Button>
   );
 }

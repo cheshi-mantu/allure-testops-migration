@@ -18,6 +18,8 @@ export interface SharedStepContent {
 
 /** What the writer needs from the source besides the planned case. */
 export interface SourceAssets {
+  /** Where attachments come from, for messages. TestRail when not set. */
+  sourceName?: string;
   attachments(caseKey: string | null): CaseAttachments;
   sharedStep(id: number): Promise<SharedStepContent>;
   /** How to fix attachment downloads that fail. */

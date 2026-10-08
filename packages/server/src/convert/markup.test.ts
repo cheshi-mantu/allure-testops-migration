@@ -57,7 +57,7 @@ describe("resolveAttachmentImages", () => {
   it("points images to uploaded attachments and marks missing ones", () => {
     const text = "![](testrail-attachment:1) ![](testrail-attachment:2)";
     const resolved = resolveAttachmentImages(text, (id) => (id === "1" ? "/api/rs/testcase/attachment/100/content" : null));
-    expect(resolved).toBe("![](/api/rs/testcase/attachment/100/content) [TestRail attachment 2 was not migrated]");
+    expect(resolved).toBe("![](/api/rs/testcase/attachment/100/content) [Attachment 2 was not migrated]");
   });
 });
 

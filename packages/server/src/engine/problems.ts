@@ -129,8 +129,17 @@ export function serverMessage(error: unknown): string | undefined {
 
 export interface ExplainContext {
   profile: Profile;
-  service: "Allure TestOps" | "TestRail";
+  service: Service;
 }
+
+export type Service = "Allure TestOps" | "TestRail" | "Jira" | "Xray";
+
+const CREDENTIAL_HINTS: Record<Service, string> = {
+  TestRail: "The user email or API key is wrong, or the API key was deleted. Create a new API key in TestRail (My Settings, API Keys) and enter it on the Connections step.",
+  "Allure TestOps": "The API token is wrong, expired or was revoked. Create a new token in Allure TestOps (your profile, API tokens) and enter it on the Connections step.",
+  Jira: "The email or API token is wrong, or the token was revoked. Create an API token for the Atlassian account (id.atlassian.com, Security, API tokens) and enter it on the Connections step.",
+  Xray: "The Xray API key (client id and secret) is wrong or was revoked, or the region does not match the Jira site. Create an API key in Jira (Apps, Xray, API Keys) and enter it on the Connections step.",
+};
 
 /**
  * Turns a failed request into what a user needs to fix it: what went wrong in their terms, why, and
@@ -171,10 +180,7 @@ export function explain(error: unknown, operation: Operation, context: ExplainCo
     return {
       key: key("401"),
       title: `${service} rejected the credentials.`,
-      hint:
-        service === "TestRail"
-          ? "The user email or API key is wrong, or the API key was deleted. Create a new API key in TestRail (My Settings, API Keys) and enter it on the Connections step."
-          : "The API token is wrong, expired or was revoked. Create a new token in Allure TestOps (your profile, API tokens) and enter it on the Connections step.",
+      hint: CREDENTIAL_HINTS[service],
       fix: connections,
       detail,
     };
@@ -186,7 +192,9 @@ export function explain(error: unknown, operation: Operation, context: ExplainCo
       hint:
         service === "TestRail"
           ? "Check that the TestRail API is enabled (Administration, Site Settings, API) and that the user can read the project."
-          : `Use the token of a user who can edit test cases in project #${project}, or ask a project administrator to grant that permission.${operation === "create a custom field" || operation === "create the tree" ? " Creating custom fields and trees needs project or instance administrator rights." : ""}`,
+          : service === "Jira" || service === "Xray"
+            ? "The Jira user must be able to browse the project, its issues and attachments. Ask a Jira administrator for the Browse projects permission in this project."
+            : `Use the token of a user who can edit test cases in project #${project}, or ask a project administrator to grant that permission.${operation === "create a custom field" || operation === "create the tree" ? " Creating custom fields and trees needs project or instance administrator rights." : ""}`,
       fix: connections,
       detail,
     };
@@ -297,12 +305,20 @@ export class KnownProblem extends Error {
 }
 
 /** Service that produced an HTTP error, from the request URL. */
-export function serviceOf(error: unknown, profile: Profile): "Allure TestOps" | "TestRail" {
+export function serviceOf(error: unknown, profile: Profile): Service {
   const cause = error instanceof OperationFailed ? error.reason : error;
-  if (cause instanceof HttpError && profile.testrail.connection.endpoint) {
-    const testrail = profile.testrail.connection.endpoint.replace(/\/+$/, "");
-    if (cause.url.startsWith(testrail)) {
+  if (cause instanceof HttpError) {
+    const startsWith = (base: string) => Boolean(base) && cause.url.startsWith(base.replace(/\/+$/, ""));
+    if (profile.source === "testrail" && startsWith(profile.testrail.connection.endpoint)) {
       return "TestRail";
+    }
+    if (profile.source === "xray" && !startsWith(profile.testops.connection.endpoint)) {
+      if (/getxray\.app|\/api\/v\d+\/(?:graphql|authenticate|attachments?)/.test(cause.url)) {
+        return "Xray";
+      }
+      if (startsWith(profile.xray.connection.jiraUrl)) {
+        return "Jira";
+      }
     }
   }
   return "Allure TestOps";

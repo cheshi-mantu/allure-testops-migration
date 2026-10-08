@@ -35,9 +35,14 @@ function otherSettings(run: RunSummary, profile: Profile, currentFileName: strin
   return runContextChanges(context, profile).map((change) => {
     switch (change) {
       case "source":
-        return profile.source === "csv"
-          ? `File "${context.sourceLabel}", the profile now uses ${currentFileName ? `"${currentFileName}"` : "another file"}.`
-          : `${context.sourceLabel}, the profile now uses TestRail project #${profile.testrail.scope.projectId ?? "?"}.`;
+        if (profile.source === "csv") {
+          return `File "${context.sourceLabel}", the profile now uses ${currentFileName ? `"${currentFileName}"` : "another file"}.`;
+        }
+        if (profile.source === "xray") {
+          const jql = profile.xray.scope.jql.trim();
+          return `${context.sourceLabel}, the profile now uses Xray project ${profile.xray.scope.projectKey || "?"}${jql ? ` (${jql})` : ""}.`;
+        }
+        return `${context.sourceLabel}, the profile now uses TestRail project #${profile.testrail.scope.projectId ?? "?"}.`;
       case "project":
         return `Allure TestOps project #${context.testopsProjectId ?? "?"}, the profile now uses #${profile.testops.scope.projectId ?? "?"}.`;
       case "tagPrefix":
@@ -68,6 +73,19 @@ function problems(profile: Profile): string[] {
     }
     return list;
   }
+  if (profile.source === "xray") {
+    const c = profile.xray.connection;
+    if (!c.jiraUrl || !c.jiraEmail || !has(c.jiraApiToken) || !c.clientId || !has(c.clientSecret)) {
+      list.push("The Xray and Jira connection is incomplete (Connections).");
+    }
+    if (!profile.xray.scope.projectKey || !profile.testops.scope.projectId) {
+      list.push("Choose both projects (Projects).");
+    }
+    if (profile.fields.length === 0) {
+      list.push("Review the field mapping (Fields).");
+    }
+    return list;
+  }
   if (!profile.testrail.connection.endpoint || !has(profile.testrail.connection.apiKey)) {
     list.push("The TestRail connection is incomplete (Connections).");
   }
@@ -87,7 +105,11 @@ function warnings(profile: Profile): string[] {
       list.push("No section path column is chosen, so cases will not be grouped into sections.");
     }
   } else if (!profile.structure.levels.some(Boolean) && !profile.structure.suiteField) {
-    list.push("No suite or section level is mapped, so the source structure will not be kept.");
+    list.push(
+      profile.source === "xray"
+        ? "No folder level is mapped, so the folders of the test repository will not be kept."
+        : "No suite or section level is mapped, so the source structure will not be kept.",
+    );
   }
   if (profile.fields.some((m) => m.target.kind === "role" && !m.target.role)) {
     list.push("A column maps to members without a role; those members will be skipped.");
@@ -346,8 +368,9 @@ export function RunStep() {
       <Modal opened={confirm} onClose={() => setConfirm(false)} title="Start the migration?">
         <Stack>
           <Text size="sm">
-            Test cases and custom fields{profile.source === "testrail" ? ", shared steps and attachments" : ""} will be created or updated in
-            Allure TestOps project #{profile.testops.scope.projectId}. {profile.source === "testrail" ? "TestRail is only read." : "The file is not changed."}
+            Test cases and custom fields{profile.source === "csv" ? "" : ", shared steps and attachments"} will be created or updated in
+            Allure TestOps project #{profile.testops.scope.projectId}.{" "}
+            {profile.source === "testrail" ? "TestRail is only read." : profile.source === "xray" ? "Jira and Xray are only read." : "The file is not changed."}
           </Text>
           <Group justify="flex-end">
             <Button variant="default" onClick={() => setConfirm(false)}>
@@ -377,6 +400,7 @@ function RunDetails({ profile, run, other }: { profile: Profile; run: RunSummary
   const counters = summary.counters;
   const percent = counters.total ? Math.round((counters.processed / counters.total) * 100) : summary.status === "running" ? 0 : 100;
   const testrailBase = profile.testrail.connection.endpoint.replace(/\/?$/, "/");
+  const jiraBase = profile.xray.connection.jiraUrl.replace(/\/?$/, "/");
   const testopsBase = profile.testops.connection.endpoint.replace(/\/?$/, "/");
   // Links point to the project the run wrote to, which may not be the one chosen now.
   const testopsProjectId = summary.context ? summary.context.testopsProjectId : profile.testops.scope.projectId;
@@ -504,6 +528,10 @@ function RunDetails({ profile, run, other }: { profile: Profile; run: RunSummary
                   (profile.source === "testrail" ? (
                     <Anchor href={`${testrailBase}index.php?/cases/view/${entry.caseId}`} target="_blank" size="xs" className="mono">
                       C{entry.caseId}
+                    </Anchor>
+                  ) : profile.source === "xray" && /^[A-Z][A-Z0-9_]*-\d+$/.test(entry.caseId) ? (
+                    <Anchor href={`${jiraBase}browse/${entry.caseId}`} target="_blank" size="xs" className="mono">
+                      {entry.caseId}
                     </Anchor>
                   ) : (
                     <Text span size="xs" className="mono" c="dimmed">

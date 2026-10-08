@@ -53,6 +53,43 @@ export const TestOpsConnectionSchema = z.object({
 });
 export type TestOpsConnection = z.infer<typeof TestOpsConnectionSchema>;
 
+/** Xray Cloud regions; the API key works only against the region of the Jira site. */
+export const XRAY_REGIONS = [
+  { value: "https://xray.cloud.getxray.app", label: "Global (xray.cloud.getxray.app)" },
+  { value: "https://us.xray.cloud.getxray.app", label: "United States" },
+  { value: "https://eu.xray.cloud.getxray.app", label: "European Union" },
+  { value: "https://au.xray.cloud.getxray.app", label: "Australia" },
+] as const;
+
+/**
+ * Xray Cloud keeps test details (type, steps, definitions, folders, preconditions, sets, plans) and
+ * Jira keeps the issue (summary, description, labels, custom fields, comments, links, attachments):
+ * a migration reads both.
+ */
+export const XrayConnectionSchema = z.object({
+  /** Xray Cloud API base URL, see {@link XRAY_REGIONS}. */
+  endpoint: z.string().default("https://xray.cloud.getxray.app"),
+  /** Xray API key: client id and client secret (Jira settings, Apps, Xray, API Keys). */
+  clientId: z.string().default(""),
+  clientSecret: z.string().default(""),
+  /** Jira Cloud site, e.g. https://yourcompany.atlassian.net. */
+  jiraUrl: z.string().default(""),
+  jiraEmail: z.string().default(""),
+  /** Atlassian API token of the Jira user. */
+  jiraApiToken: z.string().default(""),
+});
+export type XrayConnection = z.infer<typeof XrayConnectionSchema>;
+
+export const XrayScopeSchema = z.object({
+  /** Jira project key, e.g. CALC. */
+  projectKey: z.string().default(""),
+  /** Narrows the tests with JQL, e.g. `labels = regression`. Combined with the project. */
+  jql: z.string().default(""),
+  /** When not empty only these tests (issue keys) are migrated. */
+  issueKeys: z.array(z.string()).default([]),
+});
+export type XrayScope = z.infer<typeof XrayScopeSchema>;
+
 export const TestRailScopeSchema = z.object({
   projectId: z.number().int().positive().nullable().default(null),
   /** Empty means all suites of the project. */
@@ -86,7 +123,7 @@ export const StructureMappingSchema = z.object({
 });
 export type StructureMapping = z.infer<typeof StructureMappingSchema>;
 
-export const SOURCES = ["testrail", "csv"] as const;
+export const SOURCES = ["testrail", "csv", "xray"] as const;
 export type SourceType = (typeof SOURCES)[number];
 
 export const CSV_ENCODINGS = ["auto", "utf-8", "utf-16le", "utf-16be", "windows-1252", "windows-1251", "iso-8859-1"] as const;
@@ -180,11 +217,11 @@ export const MigrationOptionsSchema = z.object({
   migrationTagPrefix: z.string().default("testrail"),
   /** Extra tag put on every migrated case, e.g. the migration date. */
   additionalTag: z.string().default(""),
-  /** Add a link back to the source case (TestRail only). */
+  /** Add a link back to the source case (TestRail, Xray). */
   selfLink: z.boolean().default(true),
   /** How to read TestRail text: `auto` detects HTML produced by the new TestRail editor. */
   textFormat: z.enum(["auto", "markdown", "html"]).default("auto"),
-  /** Prepend suite and section descriptions to the case description. */
+  /** Prepend suite and section descriptions to the case description. TestRail only. */
   parentDescriptions: z.boolean().default(false),
   /** How a plain text steps field becomes a scenario. */
   textSteps: z.enum(["lines", "single"]).default("lines"),
@@ -209,6 +246,10 @@ export const ProfileSchema = z.object({
     scope: TestRailScopeSchema.prefault({}),
   }).prefault({}),
   csv: CsvSourceSchema.prefault({}),
+  xray: z.object({
+    connection: XrayConnectionSchema.prefault({}),
+    scope: XrayScopeSchema.prefault({}),
+  }).prefault({}),
   testops: z.object({
     connection: TestOpsConnectionSchema.prefault({}),
     scope: TestOpsScopeSchema.prefault({}),
@@ -223,6 +264,8 @@ export type Profile = z.infer<typeof ProfileSchema>;
 export const SECRET_PATHS = [
   ["testrail", "connection", "apiKey"],
   ["testrail", "connection", "sessionCookie"],
+  ["xray", "connection", "clientSecret"],
+  ["xray", "connection", "jiraApiToken"],
   ["testops", "connection", "apiToken"],
 ] as const;
 

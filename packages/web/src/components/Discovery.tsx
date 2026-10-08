@@ -6,13 +6,14 @@ import { ErrorAlert } from "./Problems";
 import { useProfile } from "./ProfileContext";
 
 /**
- * Loads live data from TestRail and Allure TestOps for mapping screens and shows the children
+ * Loads live data from the source and Allure TestOps for mapping screens and shows the children
  * once the data is there. Loads automatically the first time.
  */
 export function DiscoveryGate({ children, needTestOps = true }: { children: ReactNode; needTestOps?: boolean }) {
   const { profile, source: testrail, testops, refreshDiscovery } = useProfile();
   const started = useRef(false);
-  const sourceReady = profile.source === "csv" ? Boolean(profile.csv.fileId) : Boolean(profile.testrail.scope.projectId);
+  const sourceReady =
+    profile.source === "csv" ? Boolean(profile.csv.fileId) : profile.source === "xray" ? Boolean(profile.xray.scope.projectKey) : Boolean(profile.testrail.scope.projectId);
   const ready = sourceReady && (!needTestOps || Boolean(profile.testops.scope.projectId));
 
   useEffect(() => {
@@ -30,7 +31,7 @@ export function DiscoveryGate({ children, needTestOps = true }: { children: Reac
   }, [ready, needTestOps, testrail.data, testrail.isFetching, testops.data, testops.isFetching, refreshDiscovery]);
 
   if (!ready) {
-    const what = profile.source === "csv" ? "the CSV file" : "the TestRail project";
+    const what = profile.source === "csv" ? "the CSV file" : profile.source === "xray" ? "the Jira project" : "the TestRail project";
     return <Alert color="yellow">Choose {what}{needTestOps ? " and the Allure TestOps project" : ""} first.</Alert>;
   }
   const loading = testrail.isFetching || (needTestOps && testops.isFetching);
@@ -39,7 +40,13 @@ export function DiscoveryGate({ children, needTestOps = true }: { children: Reac
     return (
       <Group>
         <Loader size="sm" />
-        <Text c="dimmed">{profile.source === "csv" ? "Reading the file…" : "Reading projects, suites, sections, fields and sample cases…"}</Text>
+        <Text c="dimmed">
+          {profile.source === "csv"
+            ? "Reading the file…"
+            : profile.source === "xray"
+              ? "Reading Jira fields and sample tests from Jira and Xray…"
+              : "Reading projects, suites, sections, fields and sample cases…"}
+        </Text>
       </Group>
     );
   }
@@ -85,7 +92,7 @@ export function RefreshButton() {
       loading={source.isFetching || testops.isFetching}
       onClick={() => void refreshDiscovery()}
     >
-      Reload from {profile.source === "csv" ? "the file" : "TestRail"} and Allure TestOps
+      Reload from {profile.source === "csv" ? "the file and" : profile.source === "xray" ? "Jira, Xray and" : "TestRail and"} Allure TestOps
     </Button>
   );
 }

@@ -10,7 +10,9 @@ export function newProfile(id: string, name: string, now = new Date(), source: S
     updatedAt: now.toISOString(),
     ...(source === "csv"
       ? { options: { migrationTagPrefix: "csv", selfLink: false }, structure: { treeName: "CSV sections" } }
-      : {}),
+      : source === "xray"
+        ? { options: { migrationTagPrefix: "xray" }, structure: { treeName: "Xray folders" } }
+        : {}),
   });
 }
 
@@ -41,16 +43,19 @@ export function allowedTargets(field: TestRailFieldInfo): FieldTarget["kind"][] 
     case "steps":
       return ["scenario", "ignore"];
     case "text":
-      if (field.systemName === "custom_steps") {
+      if (field.systemName === "xray:preconditions") {
+        return ["precondition", "description", "comment", "customField", "tag", "ignore"];
+      }
+      if (field.systemName === "custom_steps" || field.systemName === "xray:definition") {
         return ["scenario", "description", "precondition", "expectedResult", "comment", "ignore"];
       }
       return ["description", "precondition", "expectedResult", "comment", "customField", "tag", "ignore"];
     case "url":
       return ["link", "customField", "description", "ignore"];
     case "user":
-      return ["owner", "customField", "tag", "ignore"];
+      return ["owner", "role", "customField", "tag", "ignore"];
     default:
-      if (field.systemName === "refs") {
+      if (field.systemName === "refs" || field.systemName.startsWith("jira:link:")) {
         return ["issue", "link", "tag", "customField", "ignore"];
       }
       return ["customField", "tag", "layer", "status", "owner", "description", "precondition", "comment", "ignore"];

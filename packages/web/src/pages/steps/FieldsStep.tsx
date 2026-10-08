@@ -104,7 +104,7 @@ function defaultTarget(kind: FieldTargetKind, field: TestRailFieldInfo, testops:
   }
 }
 
-/** Matches TestRail users to Allure TestOps accounts by email or name. */
+/** Matches source users to Allure TestOps accounts by email or name. */
 function suggestOwner(label: string, email: string | undefined, testops: TestOpsDiscovery | undefined): string | null {
   const users = testops?.users ?? [];
   const lower = (s?: string) => s?.trim().toLowerCase();
@@ -118,7 +118,7 @@ function suggestOwner(label: string, email: string | undefined, testops: TestOps
   );
 }
 
-/** Explicit owner values for TestRail users that match an Allure TestOps account. */
+/** Explicit owner values for source users that match an Allure TestOps account. */
 function ownerValues(field: TestRailFieldInfo, testops: TestOpsDiscovery | undefined, current: FieldMapping["values"]): FieldMapping["values"] {
   const values = { ...current };
   for (const option of field.options ?? []) {
@@ -185,23 +185,53 @@ function FieldsEditor() {
   });
   const csv = profile.source === "csv";
   const nameColumns = profile.fields.filter((m) => m.target.kind === "name").map((m) => m.source);
+  const xray = profile.source === "xray";
+  const longText = (f: TestRailFieldInfo) => ["text", "steps", "url"].includes(f.kind);
   const groups: { title: string; hint: string; fields: TestRailFieldInfo[] }[] = csv
     ? [{ title: "Columns", hint: "In file order. Values with a short list of options can be renamed or skipped one by one.", fields: visible }]
-    : [
+    : xray
+      ? [
+          {
+            title: "Xray test details",
+            hint: "Steps of Manual tests, definitions of Cucumber and Generic tests, preconditions, test sets and plans. The folder is mapped on the Folders step.",
+            fields: visible.filter((f) => f.systemName.startsWith("xray:")),
+          },
+          {
+            title: "Jira text",
+            hint: "Rich text and comments of the test issue, converted to Markdown with their images.",
+            fields: visible.filter((f) => f.systemName.startsWith("jira:") && !f.systemName.startsWith("jira:link:") && longText(f)),
+          },
+          {
+            title: "Jira fields with a list of values",
+            hint: "Each value can be renamed or skipped. Values not listed in the mapping keep their Jira name.",
+            fields: visible.filter((f) => f.systemName.startsWith("jira:") && f.options !== null && !longText(f)),
+          },
+          {
+            title: "Jira issue links",
+            hint: "Issues linked to the test, by link direction. Requirements a test covers (\"tests\") fit Allure TestOps issues of a Jira integration.",
+            fields: visible.filter((f) => f.systemName.startsWith("jira:link:")),
+          },
+          {
+            title: "Other Jira fields",
+            hint: "Short free text, numbers and dates.",
+            fields: visible.filter((f) => f.systemName.startsWith("jira:") && !f.systemName.startsWith("jira:link:") && f.options === null && !longText(f)),
+          },
+        ]
+      : [
     {
       title: "Text and steps",
       hint: "Long text becomes description, precondition or expected result; steps become the scenario.",
-      fields: visible.filter((f) => ["text", "steps", "url"].includes(f.kind)),
+      fields: visible.filter(longText),
     },
     {
       title: "Fields with a list of values",
       hint: "Each value can be renamed or skipped. Values not listed in the mapping keep their TestRail name.",
-      fields: visible.filter((f) => f.options !== null && !["text", "steps", "url"].includes(f.kind)),
+      fields: visible.filter((f) => f.options !== null && !longText(f)),
     },
     {
       title: "Other fields",
       hint: "Short free text and numbers.",
-      fields: visible.filter((f) => f.options === null && !["text", "steps", "url"].includes(f.kind)),
+      fields: visible.filter((f) => f.options === null && !longText(f)),
     },
       ];
   const skipped = profile.fields.filter((m) => m.target.kind === "ignore").length;
@@ -212,7 +242,9 @@ function FieldsEditor() {
         <Text c="dimmed" maw={720}>
           {csv
             ? `Choose where each column goes. Examples and counts come from all ${discovery.sampledCases} case(s) of the file.`
-            : `Choose where each TestRail field goes. Examples and counts come from ${discovery.sampledCases} sampled case(s) of the selected suites.`}
+            : xray
+              ? `Choose where each attribute of the Xray tests goes: Xray details and every Jira field used by the tests. Examples and counts come from ${discovery.sampledCases} sampled test(s).`
+              : `Choose where each TestRail field goes. Examples and counts come from ${discovery.sampledCases} sampled case(s) of the selected suites.`}
         </Text>
         <RefreshButton />
       </Group>
@@ -315,7 +347,7 @@ function FieldRow({
               </Tooltip>
             )}
             {!field.system && field.kind !== "column" && (
-              <Tooltip label="Custom field in TestRail">
+              <Tooltip label={profile.source === "xray" ? "Custom field in Jira" : "Custom field in TestRail"}>
                 <Badge size="xs" variant="dot" color="gray">
                   custom
                 </Badge>
@@ -331,8 +363,8 @@ function FieldRow({
                 ? `Filled in ${field.filledCount} row(s)`
                 : "Empty in every row"
               : field.filledCount
-                ? `Filled in ${field.filledCount} of ${sampled} sampled cases`
-                : "Empty in all sampled cases"}
+                ? `Filled in ${field.filledCount} of ${sampled} sampled ${profile.source === "xray" ? "tests" : "cases"}`
+                : `Empty in all sampled ${profile.source === "xray" ? "tests" : "cases"}`}
           </Text>
           {field.examples.length > 0 && (
             <Stack gap={2} mt={6}>
@@ -561,7 +593,7 @@ function ValueTable({
     <Table mt="sm" verticalSpacing={4}>
       <Table.Thead>
         <Table.Tr>
-          <Table.Th>{profile.source === "csv" ? "CSV value" : "TestRail value"}</Table.Th>
+          <Table.Th>{profile.source === "csv" ? "CSV value" : profile.source === "xray" ? "Jira or Xray value" : "TestRail value"}</Table.Th>
           <Table.Th w={90}>In sample</Table.Th>
           <Table.Th w="45%">Allure TestOps value</Table.Th>
           <Table.Th w={90}>Skip</Table.Th>

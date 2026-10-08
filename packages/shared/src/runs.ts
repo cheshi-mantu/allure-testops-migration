@@ -3,9 +3,14 @@ import type { Profile } from "./profile.js";
 
 /** Identifies what a run of this profile reads, see `RunContext.source`. */
 export function runSource(profile: Profile): string {
-  return profile.source === "csv"
-    ? `csv:${profile.csv.fileId ?? ""}`
-    : `testrail:${profile.testrail.connection.endpoint.replace(/\/+$/, "")}#${profile.testrail.scope.projectId ?? ""}`;
+  switch (profile.source) {
+    case "csv":
+      return `csv:${profile.csv.fileId ?? ""}`;
+    case "xray":
+      return `xray:${profile.xray.connection.jiraUrl.replace(/\/+$/, "")}#${profile.xray.scope.projectKey}#${profile.xray.scope.jql.trim()}`;
+    default:
+      return `testrail:${profile.testrail.connection.endpoint.replace(/\/+$/, "")}#${profile.testrail.scope.projectId ?? ""}`;
+  }
 }
 
 export function runContext(profile: Profile, sourceLabel: string): RunContext {

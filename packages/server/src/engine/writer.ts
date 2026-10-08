@@ -354,7 +354,7 @@ export class TestOpsWriter {
           key: "attachment-download",
           code: "attachment-download",
           level: "warn",
-          title: "Some attachments could not be downloaded from TestRail.",
+          title: `Some attachments could not be downloaded from ${this.assets.sourceName ?? "TestRail"}.`,
           hint: this.assets.attachmentHint ?? "Check the source connection.",
           fix: { step: "connections" },
           detail: message(error),
