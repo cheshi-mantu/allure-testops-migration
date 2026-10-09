@@ -119,6 +119,7 @@ describe("Xray Cloud to Allure TestOps migration", () => {
     const target = await discoverTestOps(p);
     p.fields = mergeSuggestedMappings([], discovery.fields, target);
     p.structure.levels = ["Area", "Feature", "Story"];
+    p.options.testKeyIntegrationId = 1;
 
     const dry = await run(p, true);
     expect(dry.status).toBe("finished");
@@ -148,6 +149,8 @@ describe("Xray Cloud to Allure TestOps migration", () => {
     expect(login.members).toEqual([{ name: "jane", role: { id: -1 } }]);
     // The requirement it tests, through the only issue tracker integration.
     expect(login.issues).toEqual([{ name: "CALC-100", integrationId: 1 }]);
+    // The issue key as the test key of the case.
+    expect(login.testKeys).toEqual([{ name: "CALC-1", integrationId: 1 }]);
     expect(login.links).toEqual(expect.arrayContaining([expect.objectContaining({ url: expect.stringMatching(/\/browse\/CALC-1$/) }), expect.objectContaining({ url: "https://wiki.example.com/login" })]));
     expect(state.comments.filter((c) => c.testCaseId === login.id).map((c) => c.body)).toEqual(["Reviewed, looks good."]);
     expect(login.attachments.map((a) => a.name).sort()).toEqual(["accounts.csv", "creds.png", "login-form.png", "step-2-data-table-1.csv"]);
@@ -188,5 +191,9 @@ describe("Xray Cloud to Allure TestOps migration", () => {
     p.xray.scope.jql = "";
     p.xray.scope.issueKeys = ["CALC-2", "CALC-3"];
     expect((await run(p, true)).counters.total).toBe(2);
+
+    // A test key integration that the project does not have is reported before writing.
+    p.options.testKeyIntegrationId = 99;
+    expect((await run(p, true)).problems?.map((problem) => problem.code)).toContain("test-key-integration-missing");
   });
 });

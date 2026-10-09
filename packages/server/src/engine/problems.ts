@@ -62,6 +62,7 @@ export type Operation =
   | "set tags"
   | "set custom fields"
   | "set issues"
+  | "set test keys"
   | "set members"
   | "add comments"
   | "upload attachments"
@@ -253,6 +254,14 @@ export function explain(error: unknown, operation: Operation, context: ExplainCo
         title: "Allure TestOps did not accept the issue links.",
         hint: "Check that the issue tracker integration chosen for the issues field is enabled in the project, and that the values are issue keys such as ABC-123 (set a separator when a cell holds several).",
         fix: fieldMatching((t) => t.kind === "issue"),
+        detail,
+      };
+    case "set test keys":
+      return {
+        key: key(`${status}:${detail.slice(0, 80)}`),
+        title: "Allure TestOps did not accept the test keys.",
+        hint: "The integration chosen for test keys on the Options step must be enabled in the project and support test keys (a test management system integration). Choose another one, or turn test keys off.",
+        fix: { step: "options" },
         detail,
       };
     case "set members":

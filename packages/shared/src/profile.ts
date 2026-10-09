@@ -229,6 +229,11 @@ export const MigrationOptionsSchema = z.object({
   migrateSharedSteps: z.boolean().default(true),
   /** Migrate cases that were deleted in TestRail (only available for TestRail versions that expose them). */
   includeDeleted: z.boolean().default(false),
+  /**
+   * Integration that receives the source key of every case as an Allure TestOps test key (Xray: the
+   * issue key). Null writes no test keys.
+   */
+  testKeyIntegrationId: z.number().int().positive().nullable().default(null),
   /** Cases processed in parallel. */
   concurrency: z.number().int().min(1).max(16).default(2),
 });

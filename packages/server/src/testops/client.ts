@@ -251,6 +251,16 @@ export class TestOpsClient {
     return this.http.json("POST", `api/rs/testcase/${testCaseId}/issue`, { body: issues });
   }
 
+  /** Test keys of a test case: keys in test management systems connected through integrations. */
+  testKeys(testCaseId: number): Promise<{ name: string; integrationId?: number | null }[]> {
+    return this.http.get(`api/rs/testcase/${testCaseId}/testkey`);
+  }
+
+  /** Replaces all test keys of a test case. */
+  setTestKeys(testCaseId: number, keys: { name: string; integrationId: number }[]): Promise<unknown> {
+    return this.http.json("POST", `api/rs/testcase/${testCaseId}/testkey`, { body: keys });
+  }
+
   /** Replaces the members of a test case. Role -1 is the owner role. */
   setMembers(testCaseId: number, members: { name: string; role: { id: number } }[]): Promise<unknown> {
     return this.http.json("POST", `api/rs/testcase/${testCaseId}/members`, { body: members });

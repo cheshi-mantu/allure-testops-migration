@@ -263,6 +263,15 @@ function Preview() {
                 <Row label="Issues">
                   <Text size="sm">{planned.issues.map((i) => i.key).join(", ") || "none"}</Text>
                 </Row>
+                {planned.testKeys && planned.testKeys.length > 0 && (
+                  <Row label="Test keys">
+                    <Text size="sm">
+                      {planned.testKeys
+                        .map((k) => `${k.key} (${testops.data?.integrations.find((i) => i.id === k.integrationId)?.name ?? `integration #${k.integrationId}`})`)
+                        .join(", ")}
+                    </Text>
+                  </Row>
+                )}
                 <Row label="Description">
                   <TextBlock value={planned.description} />
                 </Row>

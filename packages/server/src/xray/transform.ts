@@ -161,6 +161,9 @@ export function transformXrayCase(testCase: XrayCase, context: XrayContext): Xra
   if (options.selfLink) {
     planned.links.push({ name: `Jira ${issue.key}`, url });
   }
+  if (options.testKeyIntegrationId) {
+    planned.testKeys = [{ key: issue.key, integrationId: options.testKeyIntegrationId }];
+  }
   const addCustomField = (name: string, values: string[]) => {
     if (values.length === 0) {
       return;

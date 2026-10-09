@@ -72,8 +72,12 @@ const TEXT_DEFAULTS: Record<string, FieldTarget> = {
   custom_goals: { kind: "description", heading: "Goals" },
 };
 
-/** A sensible first mapping for a TestRail field. The user reviews every suggestion in the UI. */
+/** A sensible first mapping for a source field. The user reviews every suggestion in the UI. */
 export function suggestTarget(field: TestRailFieldInfo, testops?: TestOpsDiscovery | null): FieldTarget {
+  // Empty in every sampled record: nothing to migrate. The user can still choose a target.
+  if (field.filledCount === 0) {
+    return { kind: "ignore" };
+  }
   if (field.suggestedTarget) {
     const target = field.suggestedTarget;
     if (target.kind === "issue" && target.integrationId === null && testops?.integrations.length === 1) {

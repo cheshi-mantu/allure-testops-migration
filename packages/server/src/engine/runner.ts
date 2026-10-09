@@ -416,6 +416,22 @@ export class Run {
     this.phase("Checking the Allure TestOps project");
     const target = await discoverTestOps(this.profile, testops);
     target.warnings.forEach((warning) => this.log("warn", warning));
+    const testKeyIntegration = this.profile.options.testKeyIntegrationId;
+    if (testKeyIntegration) {
+      const integration = target.integrations.find((i) => i.id === testKeyIntegration);
+      if (integration) {
+        this.log("info", `Test keys are written through the integration "${integration.name}".`);
+      } else {
+        this.report("warn", `Integration #${testKeyIntegration} for test keys is not enabled in the project; test keys would not be set.`, {
+          key: "test-key-integration-missing",
+          code: "test-key-integration-missing",
+          level: "warn",
+          title: "The integration chosen for test keys is not enabled in the Allure TestOps project.",
+          hint: "Choose an enabled integration for test keys on the Options step, or turn test keys off.",
+          fix: { step: "options" },
+        });
+      }
+    }
     for (const [name, values] of fieldValues) {
       this.checkCancelled();
       const field = target.customFields.find((f) => f.name === name);
@@ -603,6 +619,7 @@ function describePlan(planned: PlannedCase): string {
   if (fieldValues) parts.push(`${fieldValues} custom field value(s)`);
   if (planned.tags.length > 1) parts.push(`${planned.tags.length - 1} tag(s)`);
   if (planned.issues.length) parts.push(`${planned.issues.length} issue(s)`);
+  if (planned.testKeys?.length) parts.push(`test key ${planned.testKeys.map((k) => k.key).join(", ")}`);
   if (planned.links.length) parts.push(`${planned.links.length} link(s)`);
   if (planned.owner) parts.push(`owner ${planned.owner}`);
   if (planned.members.length) parts.push(`${planned.members.length} member(s)`);

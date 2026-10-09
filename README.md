@@ -84,6 +84,7 @@ Xray keeps the details of a test (type, steps, Cucumber or generic definition, f
 | Priority, components, versions, select fields | Custom fields, with value mapping |
 | Assignee | Owner, matched by email |
 | Requirements (`tests` links) | Issues of the Jira integration of the project |
+| Issue key | Link back to the issue (`Jira CALC-12`) and, optionally, a test key through an integration chosen on the Options step |
 | Comments | Comments |
 | Issue attachments, images in text | Test case attachments; images keep their place in text |
 
@@ -141,6 +142,17 @@ docker compose -f dev-compose.yml run --rm --build tests -d
 ```
 
 Fake server credentials: TestRail user `demo@example.com` with API key `demo-api-key`, Allure TestOps token `demo-api-token`. Inside `dev-compose.yml` use `http://mocks:4001` and `http://mocks:4002` as URLs; from the host use `http://localhost:4001` and `http://localhost:4002`. The fake Jira and Xray Cloud run on port 4003 (`http://mocks:4003` or `http://localhost:4003` for both the Jira site and the Xray API URL): Jira `demo@example.com` with token `demo-jira-token`, Xray client id `demo-client-id` and secret `demo-client-secret`.
+
+### Test data in a real Xray Cloud
+
+`dev/xray-seed.ts` fills a Jira Cloud project with Xray tests that cover what the migration reads: Manual tests with formatted steps, step files and called tests, Cucumber and Generic tests, preconditions (also more than ten on one test), folders, test sets and plans, labels, priorities, components, versions, descriptions with images and tables, comments, attachments and requirement links. It also creates about 30 realistic scenarios of a web shop, its API and mobile app (`dev/xray-seed-scenarios.ts`), and `--bulk N` adds N variations of them (browsers, locales, roles, negative input) for paging and speed. Manual tests vary in shape: steps as written, steps only, steps without expected results, one check at the end, and long tests of 15 to 25 steps with or without expected results; the label `shape-...` tells which. Everything it creates is labelled `atm-seed`, and `--cleanup --yes` deletes it again. The project needs the Xray issue types and Story.
+
+```bash
+export JIRA_URL=https://yourcompany.atlassian.net JIRA_EMAIL=you@example.com JIRA_API_TOKEN=...
+export XRAY_CLIENT_ID=... XRAY_CLIENT_SECRET=...   # XRAY_URL for regional sites
+npx tsx dev/xray-seed.ts --project KEY --bulk 300
+npx tsx dev/xray-seed.ts --project KEY --cleanup --yes
+```
 
 ### Layout
 

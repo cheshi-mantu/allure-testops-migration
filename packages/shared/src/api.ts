@@ -255,6 +255,8 @@ export interface PlannedCase {
   members: { name: string; role: string }[];
   links: { name: string; url: string }[];
   issues: { key: string; integrationId: number | null }[];
+  /** Keys of the case in a test management system known to Allure TestOps through an integration, e.g. an Xray test key. */
+  testKeys?: { key: string; integrationId: number }[];
   comments: string[];
   attachments: PlannedAttachment[];
   scenario: PlannedStep[];

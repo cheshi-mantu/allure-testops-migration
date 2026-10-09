@@ -28,6 +28,7 @@ interface TestCase {
   tags: string[];
   cfv: { name: string; customField: { id: number; name?: string } }[];
   issues: unknown[];
+  testKeys: { name: string; integrationId: number }[];
   members: unknown[];
   scenario: Step[];
   attachments: Named[];
@@ -257,6 +258,7 @@ export function createTestOpsMock(options: TestOpsMockOptions = {}): { app: Fast
       tags: [],
       cfv: [],
       issues: [],
+      testKeys: [],
       members: [],
       scenario: [],
       attachments: [],
@@ -294,6 +296,22 @@ export function createTestOpsMock(options: TestOpsMockOptions = {}): { app: Fast
     const tc = testCase(request);
     tc.issues = request.body as unknown[];
     return tc.issues;
+  });
+  app.get("/api/rs/testcase/:id/testkey", async (request) => {
+    const tc = state.testCases.find((t) => t.id === Number((request.params as { id: string }).id));
+    return tc?.testKeys ?? [];
+  });
+  app.post("/api/rs/testcase/:id/testkey", async (request, reply) => {
+    const tc = state.testCases.find((t) => t.id === Number((request.params as { id: string }).id));
+    if (!tc) {
+      return reply.status(404).send({ message: "Test case not found" });
+    }
+    const keys = request.body as { name: string; integrationId: number }[];
+    if (keys.some((k) => !(integrations[tc.projectId] ?? []).some((i) => i.id === k.integrationId))) {
+      return reply.status(400).send({ message: "Integration not found in project" });
+    }
+    tc.testKeys = keys;
+    return keys;
   });
   app.post("/api/rs/testcase/:id/members", async (request, reply) => {
     const tc = testCase(request);

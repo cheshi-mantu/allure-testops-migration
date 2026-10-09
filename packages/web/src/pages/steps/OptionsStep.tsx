@@ -1,10 +1,20 @@
-import { Card, NumberInput, Radio, SimpleGrid, Stack, Switch, Text, TextInput, Title } from "@mantine/core";
+import { Alert, Card, NumberInput, Radio, Select, SimpleGrid, Stack, Switch, Text, TextInput, Title } from "@mantine/core";
+import { useEffect } from "react";
 import type { MigrationOptions } from "@atm/shared";
 import { useProfile } from "../../components/ProfileContext";
 
 export function OptionsStep() {
-  const { profile, update } = useProfile();
+  const { profile, update, testops } = useProfile();
   const options = profile.options;
+  // Integrations of the target project, for test keys.
+  const projectChosen = Boolean(profile.testops.scope.projectId);
+  useEffect(() => {
+    if (profile.source === "xray" && projectChosen && !testops.data && !testops.isFetching && !testops.error) {
+      void testops.refetch();
+    }
+  }, [profile.source, projectChosen, testops]);
+  const integrations = testops.data?.integrations ?? [];
+  const chosenIntegration = options.testKeyIntegrationId;
   const csv = profile.source === "csv";
   const xray = profile.source === "xray";
   const testrail = profile.source === "testrail";
@@ -41,9 +51,34 @@ export function OptionsStep() {
           {!csv && (
           <Switch
             label={xray ? "Link back to the Jira issue" : "Link back to the TestRail case"}
+            description={xray ? "A link named after the issue key, e.g. \"Jira CALC-12\", in the Links of the case." : undefined}
             checked={options.selfLink}
             onChange={(e) => set("selfLink", e.currentTarget.checked)}
           />
+          )}
+          {xray && (
+            <Select
+              label="Issue key as a test key"
+              description="Writes the issue key, e.g. CALC-12, to the Test keys of the case through an integration of the Allure TestOps project, such as Xray or Jira."
+              placeholder={testops.isFetching ? "Loading integrations…" : "Do not add a test key"}
+              clearable
+              data={[
+                ...integrations.map((i) => ({ value: String(i.id), label: i.name })),
+                ...(chosenIntegration && !integrations.some((i) => i.id === chosenIntegration)
+                  ? [{ value: String(chosenIntegration), label: `Integration #${chosenIntegration}` }]
+                  : []),
+              ]}
+              value={chosenIntegration ? String(chosenIntegration) : null}
+              onChange={(value) => set("testKeyIntegrationId", value ? Number(value) : null)}
+            />
+          )}
+          {xray && chosenIntegration && testops.data && !integrations.some((i) => i.id === chosenIntegration) && (
+            <Alert color="red">This integration is not enabled in the Allure TestOps project any more. Choose another one or clear the field.</Alert>
+          )}
+          {xray && projectChosen && testops.data && integrations.length === 0 && (
+            <Text size="xs" c="dimmed">
+              The Allure TestOps project has no enabled integration. Add one in the project settings (Integrations) to write test keys.
+            </Text>
           )}
         </Stack>
       </Card>
