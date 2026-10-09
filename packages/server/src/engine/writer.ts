@@ -189,6 +189,18 @@ export class TestOpsWriter {
       );
     }
 
+    const testKeys = planned.testKeys ?? [];
+    if (testKeys.length > 0) {
+      await this.op("set test keys", async () => {
+        // Setting test keys replaces all of them: keep the keys of other integrations.
+        const managed = new Set(testKeys.map((k) => k.integrationId));
+        const others = (await this.testops.testKeys(testCase.id).catch(() => []))
+          .filter((k) => k.integrationId && !managed.has(k.integrationId))
+          .map((k) => ({ name: k.name, integrationId: k.integrationId! }));
+        await this.testops.setTestKeys(testCase.id, [...others, ...testKeys.map((k) => ({ name: k.key, integrationId: k.integrationId }))]);
+      });
+    }
+
     await this.writeMembers(testCase.id, planned, log);
 
     if (planned.comments.length > 0) {
@@ -354,7 +366,7 @@ export class TestOpsWriter {
           key: "attachment-download",
           code: "attachment-download",
           level: "warn",
-          title: "Some attachments could not be downloaded from TestRail.",
+          title: `Some attachments could not be downloaded from ${this.assets.sourceName ?? "TestRail"}.`,
           hint: this.assets.attachmentHint ?? "Check the source connection.",
           fix: { step: "connections" },
           detail: message(error),

@@ -1,6 +1,6 @@
-import { Alert, Card, Loader, MultiSelect, Select, SimpleGrid, Stack, TagsInput, Text, Title } from "@mantine/core";
+import { Alert, Card, Code, Loader, MultiSelect, Select, SimpleGrid, Stack, TagsInput, Text, TextInput, Title } from "@mantine/core";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { api, errorText } from "../../api/client";
 import { useProfile } from "../../components/ProfileContext";
 
@@ -9,7 +9,7 @@ export function ScopeStep() {
   const queryClient = useQueryClient();
 
   const trProjects = useQuery({
-    enabled: profile.source !== "csv",
+    enabled: profile.source === "testrail",
     queryKey: ["projects", "testrail", profile.id],
     queryFn: async () => {
       await flush();
@@ -37,7 +37,7 @@ export function ScopeStep() {
       await flush();
       return api.testRailSuites(profile.id);
     },
-    enabled: profile.source !== "csv" && Boolean(profile.testrail.scope.projectId),
+    enabled: profile.source === "testrail" && Boolean(profile.testrail.scope.projectId),
   });
 
   const invalidateDiscovery = () => void queryClient.removeQueries({ queryKey: ["discovery"] });
@@ -61,7 +61,8 @@ export function ScopeStep() {
   return (
     <Stack>
       <SimpleGrid cols={{ base: 1, lg: profile.source === "csv" ? 1 : 2 }} maw={profile.source === "csv" ? 640 : undefined}>
-        {profile.source !== "csv" && (
+        {profile.source === "xray" && <XrayScopeCard onChange={invalidateDiscovery} />}
+        {profile.source === "testrail" && (
         <Card withBorder>
           <Stack>
             <Title order={4}>From TestRail</Title>
@@ -138,5 +139,77 @@ export function ScopeStep() {
         </Card>
       </SimpleGrid>
     </Stack>
+  );
+}
+
+/** Jira project of the tests, an optional JQL filter and an optional list of tests for a trial run. */
+function XrayScopeCard({ onChange }: { onChange: () => void }) {
+  const { profile, update, flush } = useProfile();
+  const scope = profile.xray.scope;
+  const projects = useQuery({
+    queryKey: ["projects", "xray", profile.id],
+    queryFn: async () => {
+      await flush();
+      const result = await api.checkXray(profile.id);
+      if (!result.ok) {
+        throw new Error(result.message);
+      }
+      return result.projects;
+    },
+  });
+  useEffect(() => {
+    const only = projects.data?.length === 1 ? projects.data[0]! : null;
+    if (only?.key && !scope.projectKey) {
+      update((p) => void (p.xray.scope.projectKey = only.key!));
+    }
+  }, [projects.data, scope.projectKey, update]);
+  const [jql, setJql] = useState(scope.jql);
+
+  return (
+    <Card withBorder>
+      <Stack>
+        <Title order={4}>From Xray</Title>
+        {projects.error && <Alert color="red">{errorText(projects.error)}</Alert>}
+        <Select
+          label="Jira project"
+          placeholder={projects.isLoading ? "Loading…" : "Choose a project"}
+          rightSection={projects.isLoading ? <Loader size={14} /> : undefined}
+          searchable
+          data={[
+            ...(projects.data ?? []).filter((p) => p.key).map((p) => ({ value: p.key!, label: p.name })),
+            ...(scope.projectKey && !projects.data?.some((p) => p.key === scope.projectKey) ? [{ value: scope.projectKey, label: scope.projectKey }] : []),
+          ]}
+          value={scope.projectKey || null}
+          onChange={(value) => {
+            update((p) => void (p.xray.scope.projectKey = value ?? ""));
+            onChange();
+          }}
+        />
+        <TextInput
+          label="JQL filter (optional)"
+          description={
+            <>
+              Narrows the Xray tests of the project, e.g. <Code>labels = regression</Code> or <Code>component = Checkout</Code>. Leave empty for all tests.
+            </>
+          }
+          placeholder="labels = regression"
+          value={jql}
+          onChange={(e) => setJql(e.currentTarget.value)}
+          onBlur={() => {
+            if (jql !== scope.jql) {
+              update((p) => void (p.xray.scope.jql = jql.trim()));
+              onChange();
+            }
+          }}
+        />
+        <TagsInput
+          label="Only these tests (optional)"
+          description="Issue keys like CALC-12, useful for a trial migration. Leave empty for everything."
+          placeholder="Type a key and press Enter"
+          value={scope.issueKeys}
+          onChange={(values) => update((p) => void (p.xray.scope.issueKeys = [...new Set(values.map((v) => v.trim().toUpperCase()).filter(Boolean))]))}
+        />
+      </Stack>
+    </Card>
   );
 }

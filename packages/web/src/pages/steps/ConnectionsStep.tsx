@@ -1,8 +1,8 @@
-import { Alert, Anchor, Button, Card, Collapse, Group, NumberInput, PasswordInput, Select, SimpleGrid, Stack, Switch, Text, TextInput, Title } from "@mantine/core";
+import { Alert, Anchor, Autocomplete, Button, Card, Collapse, Group, NumberInput, PasswordInput, Select, SimpleGrid, Stack, Switch, Text, TextInput, Title } from "@mantine/core";
 import { IconAlertCircle, IconCircleCheck } from "@tabler/icons-react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
-import { SECRET_MASK, TESTRAIL_RATE_LIMITS, type TestRailConnection } from "@atm/shared";
+import { SECRET_MASK, TESTRAIL_RATE_LIMITS, XRAY_REGIONS, type TestRailConnection } from "@atm/shared";
 import { api, errorText, type CheckResult } from "../../api/client";
 import { useProfile } from "../../components/ProfileContext";
 
@@ -70,7 +70,8 @@ export function ConnectionsStep() {
         Credentials are stored only in this tool's data volume and are never included in an export unless you ask for it.
       </Text>
       <SimpleGrid cols={{ base: 1, lg: profile.source === "csv" ? 1 : 2 }} maw={profile.source === "csv" ? 640 : undefined}>
-        {profile.source !== "csv" && (
+        {profile.source === "xray" && <XrayConnectionCard />}
+        {profile.source === "testrail" && (
         <Card withBorder>
           <Stack>
             <Title order={4}>TestRail (source)</Title>
@@ -210,5 +211,84 @@ export function ConnectionsStep() {
         </Card>
       </SimpleGrid>
     </Stack>
+  );
+}
+
+/** Xray Cloud API key for test details, Jira account for the issues: both are needed. */
+function XrayConnectionCard() {
+  const { profile, update, flush } = useProfile();
+  const queryClient = useQueryClient();
+  const xc = profile.xray.connection;
+  const check = useMutation({
+    mutationFn: async () => {
+      await flush();
+      return api.checkXray(profile.id);
+    },
+    onSuccess: (result) => queryClient.setQueryData(["projects", "xray", profile.id], result.projects),
+  });
+  const set = <K extends keyof typeof xc>(key: K, value: (typeof xc)[K]) => update((p) => void (p.xray.connection[key] = value));
+
+  return (
+    <Card withBorder>
+      <Stack>
+        <Title order={4}>Xray Cloud and Jira (source)</Title>
+        <Text size="sm" c="dimmed">
+          Xray keeps the test details (type, steps, definitions, folders, preconditions, sets, plans), Jira keeps the issue (summary,
+          description, fields, comments, links, attachments). The migration reads both.
+        </Text>
+        <TextInput
+          label="Jira site"
+          placeholder="https://yourcompany.atlassian.net"
+          value={xc.jiraUrl}
+          onChange={(e) => set("jiraUrl", e.currentTarget.value)}
+        />
+        <SimpleGrid cols={{ base: 1, sm: 2 }}>
+          <TextInput label="Jira user email" value={xc.jiraEmail} onChange={(e) => set("jiraEmail", e.currentTarget.value)} />
+          <PasswordInput
+            label="Atlassian API token"
+            description={
+              <>
+                Create one at <i>id.atlassian.com → Security → API tokens</i>.
+              </>
+            }
+            placeholder={secretPlaceholder(xc.jiraApiToken)}
+            value={secretValue(xc.jiraApiToken)}
+            onChange={(e) => set("jiraApiToken", e.currentTarget.value)}
+          />
+        </SimpleGrid>
+        <Autocomplete
+          label="Xray API URL"
+          description={`${XRAY_REGIONS.find((r) => r.value === xc.endpoint.replace(/\/+$/, ""))?.label ?? "Custom address"}. Global fits most sites; sites with data residency use their region (us., eu. or au.).`}
+          data={XRAY_REGIONS.map((r) => r.value)}
+          value={xc.endpoint}
+          onChange={(value) => set("endpoint", value.trim())}
+        />
+        <SimpleGrid cols={{ base: 1, sm: 2 }}>
+          <TextInput
+            label="Xray client id"
+            description={
+              <>
+                An Xray API key: Jira <i>Apps → Xray → API Keys</i>.
+              </>
+            }
+            value={xc.clientId}
+            onChange={(e) => set("clientId", e.currentTarget.value)}
+          />
+          <PasswordInput
+            label="Xray client secret"
+            description="Shown once when the key is created."
+            placeholder={secretPlaceholder(xc.clientSecret)}
+            value={secretValue(xc.clientSecret)}
+            onChange={(e) => set("clientSecret", e.currentTarget.value)}
+          />
+        </SimpleGrid>
+        <Group>
+          <Button variant="light" loading={check.isPending} onClick={() => check.mutate()}>
+            Test connection
+          </Button>
+        </Group>
+        <CheckAlert result={check.data} error={check.error} />
+      </Stack>
+    </Card>
   );
 }

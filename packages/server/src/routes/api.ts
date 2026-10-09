@@ -29,7 +29,9 @@ import { explain, KnownProblem, OperationFailed, serviceOf } from "../engine/pro
 import { HttpError } from "../http/httpClient.js";
 import { prepareSource } from "../engine/sources.js";
 import type { FileStore } from "../storage/fileStore.js";
-import { checkTestOps, checkTestRail } from "./checks.js";
+import { checkTestOps, checkTestRail, checkXray } from "./checks.js";
+import { discoverXray, loadXrayContext, readCalledTests, readXrayCase } from "../xray/discovery.js";
+import { transformXrayCase } from "../xray/transform.js";
 
 export interface ApiDeps {
   files: FileStore;
@@ -109,6 +111,7 @@ export async function registerApi(app: FastifyInstance, deps: ApiDeps): Promise<
         fileName: profile.csv.fileId ? (fileNames.get(profile.csv.fileId) ?? null) : null,
         updatedAt: profile.updatedAt,
         testrailEndpoint: profile.testrail.connection.endpoint,
+        xrayProject: profile.xray.scope.projectKey,
         testopsEndpoint: profile.testops.connection.endpoint,
         lastRun: (await runs.list(profile.id))[0] ?? null,
       })),
@@ -180,6 +183,7 @@ export async function registerApi(app: FastifyInstance, deps: ApiDeps): Promise<
 
   app.post<{ Params: { id: string } }>("/api/profiles/:id/testrail/check", async (request) => checkTestRail(await load(request.params.id)));
   app.post<{ Params: { id: string } }>("/api/profiles/:id/testops/check", async (request) => checkTestOps(await load(request.params.id)));
+  app.post<{ Params: { id: string } }>("/api/profiles/:id/xray/check", async (request) => checkXray(await load(request.params.id)));
 
   app.get<{ Params: { id: string } }>("/api/profiles/:id/testrail/suites", async (request) => {
     const profile = await load(request.params.id);
@@ -192,7 +196,8 @@ export async function registerApi(app: FastifyInstance, deps: ApiDeps): Promise<
     return { suiteMode: project.suite_mode, suites: suites.map((s) => ({ id: s.id, name: s.name })) };
   });
 
-  const discoverSource = async (profile: Profile) => (profile.source === "csv" ? discoverCsv(profile, files) : discoverTestRail(profile));
+  const discoverSource = async (profile: Profile) =>
+    profile.source === "csv" ? discoverCsv(profile, files) : profile.source === "xray" ? discoverXray(profile) : discoverTestRail(profile);
   app.post<{ Params: { id: string } }>("/api/profiles/:id/source/discover", async (request) => discoverSource(await load(request.params.id)));
   app.post<{ Params: { id: string } }>("/api/profiles/:id/testrail/discover", async (request) => discoverSource(await load(request.params.id)));
 
@@ -279,6 +284,25 @@ export async function registerApi(app: FastifyInstance, deps: ApiDeps): Promise<
       } catch (error) {
         throw error instanceof CaseSkipped ? Object.assign(error, { statusCode: 422 }) : error;
       }
+    }
+    if (profile.source === "xray") {
+      const context = await loadXrayContext(profile);
+      const key = rawId.toUpperCase();
+      const testCase = await readXrayCase(context, key);
+      if (!testCase) {
+        throw Object.assign(new Error(`${key} is not an Xray test the Jira user can see.`), { statusCode: 404 });
+      }
+      const called = await readCalledTests(context, [testCase]);
+      const { planned, linkedCaseIds } = transformXrayCase(testCase, { profile, catalog: context.catalog, jiraBase: context.jira.endpoint, called });
+      if (testCase.issue.key.split("-")[0] !== context.project.key) {
+        planned.notes.push({
+          code: "xray-other-project",
+          text: `${testCase.issue.key} belongs to another Jira project than the one chosen for migration.`,
+          hint: "Choose its project on the Projects step if it should be migrated.",
+          fix: { step: "scope" },
+        });
+      }
+      return { ...planned, linkedCaseIds };
     }
     const caseId = Number(rawId.replace(/^C/i, ""));
     if (!Number.isInteger(caseId) || caseId <= 0) {

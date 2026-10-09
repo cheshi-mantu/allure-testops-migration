@@ -69,7 +69,7 @@ export class HttpClient {
 
   constructor(options: HttpClientOptions) {
     this.baseUrl = withTrailingSlash(options.baseUrl);
-    this.headers = options.headers ?? {};
+    this.headers = { ...(options.headers ?? {}) };
     this.dispatcher = options.insecureTls ? new Agent({ connect: { rejectUnauthorized: false } }) : undefined;
     this.retries = options.retries ?? 5;
     this.timeoutMs = options.timeoutMs ?? 120_000;
@@ -78,9 +78,12 @@ export class HttpClient {
     this.onRetry = options.onRetry;
   }
 
-  /** `path` is appended to the base URL as is, so TestRail style `index.php?/api/v2/...` paths work. */
+  /**
+   * `path` is appended to the base URL as is, so TestRail style `index.php?/api/v2/...` paths work.
+   * An absolute URL (a download link the server handed out) is used unchanged.
+   */
   url(path: string, query?: Query): string {
-    let url = this.baseUrl + path.replace(/^\//, "");
+    let url = /^https?:\/\//i.test(path) ? path : this.baseUrl + path.replace(/^\//, "");
     if (query) {
       const params = Object.entries(query)
         .filter(([, value]) => value !== undefined && value !== null)
@@ -118,10 +121,15 @@ export class HttpClient {
     return this.json<T>("GET", path, { query });
   }
 
-  async bytes(path: string, extraHeaders: Record<string, string> = {}): Promise<{ data: Buffer; contentType: string | null }> {
+  async bytes(path: string, extraHeaders: Record<string, string> = {}): Promise<{ data: Buffer; contentType: string | null; fileName: string | null }> {
     const response = await this.send(this.url(path), { method: "GET", headers: extraHeaders });
     const data = Buffer.from(await response.arrayBuffer());
-    return { data, contentType: response.headers.get("content-type") };
+    return { data, contentType: response.headers.get("content-type"), fileName: dispositionFileName(response.headers.get("content-disposition")) };
+  }
+
+  /** Replaces a header sent with every request, e.g. a renewed bearer token. */
+  setHeader(name: string, value: string): void {
+    this.headers[name] = value;
   }
 
   async upload<T>(path: string, query: Query, files: { field: string; name: string; data: Buffer; contentType: string }[]): Promise<T> {
@@ -204,6 +212,23 @@ export class HttpClient {
       throw new HttpError(`${base.method ?? "GET"} ${describe(url)} failed with ${response.status}${errorDetail(body)}`, response.status, url, body.slice(0, 2000));
     }
   }
+}
+
+/** File name from `Content-Disposition`, also the RFC 5987 `filename*=UTF-8''...` form. */
+function dispositionFileName(header: string | null): string | null {
+  if (!header) {
+    return null;
+  }
+  const extended = /filename\*\s*=\s*(?:UTF-8|utf-8)''([^;]+)/.exec(header);
+  if (extended) {
+    try {
+      return decodeURIComponent(extended[1]!.trim().replace(/^"|"$/g, ""));
+    } catch {
+      // Fall through to the plain form.
+    }
+  }
+  const plain = /filename\s*=\s*"?([^";]+)"?/.exec(header);
+  return plain ? plain[1]!.trim() : null;
 }
 
 function looksLikeHtml(text: string): boolean {

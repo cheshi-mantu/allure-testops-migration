@@ -10,17 +10,23 @@ import { loadTestRailContext } from "../testrail/discovery.js";
 import type { TrCase } from "../testrail/types.js";
 import { noAssets, testRailAssets, type SourceAssets } from "./assets.js";
 import { KnownProblem } from "./problems.js";
+import { XrayAssets } from "../xray/assets.js";
+import { loadXrayContext, readCalledTests, readXrayCases } from "../xray/discovery.js";
+import { transformXrayCase, type XrayContext } from "../xray/transform.js";
+import type { XrayCase } from "../xray/types.js";
 
 export interface SourceCase {
   key: string;
   title: string;
   /** CSV: 1-based line of the first row in the file. */
   line?: number;
+  /** How people name the record, e.g. a Jira issue key. */
+  label?: string;
 }
 
-/** "Line 12" for CSV records, "C123" for TestRail cases: how a person finds the record in the source. */
+/** "Line 12" for CSV records, "C123" for TestRail cases, the issue key for Xray: how a person finds the record in the source. */
 export function caseLabel(testCase: SourceCase): string {
-  return testCase.line !== undefined ? `Line ${testCase.line}` : `C${testCase.key}`;
+  return testCase.label ?? (testCase.line !== undefined ? `Line ${testCase.line}` : `C${testCase.key}`);
 }
 
 export interface Transformed {
@@ -45,7 +51,48 @@ export interface SourceDeps {
 }
 
 export async function prepareSource(profile: Profile, deps: SourceDeps, log: Log, onRetry?: (info: RetryInfo) => void): Promise<PreparedSource> {
-  return profile.source === "csv" ? prepareCsv(profile, deps, log) : prepareTestRail(profile, log, onRetry);
+  switch (profile.source) {
+    case "csv":
+      return prepareCsv(profile, deps, log);
+    case "xray":
+      return prepareXray(profile, log, onRetry);
+    default:
+      return prepareTestRail(profile, log, onRetry);
+  }
+}
+
+type XraySourceCase = SourceCase & { raw: XrayCase };
+
+async function prepareXray(profile: Profile, log: Log, onRetry?: (info: RetryInfo) => void): Promise<PreparedSource<XraySourceCase>> {
+  const xrayContext = await loadXrayContext(profile, onRetry);
+  xrayContext.warnings.forEach((warning) => log("warn", warning));
+  log("info", `Jira project ${xrayContext.project.key}: ${xrayContext.totalTests} Xray test(s), issue type "${xrayContext.issueType}".`);
+  const context: XrayContext = { profile, catalog: xrayContext.catalog, jiraBase: xrayContext.jira.endpoint, called: new Map() };
+  const assets = new XrayAssets(xrayContext.xray, xrayContext.jira, context);
+  return {
+    name: "Jira and Xray",
+    assets,
+    testrail: null,
+    transform: (testCase) => transformXrayCase(testCase.raw, context),
+    readCases: async (logCase, isCancelled) => {
+      const cases: XrayCase[] = [];
+      for await (const page of readXrayCases(xrayContext, profile)) {
+        cases.push(...page);
+        logCase("info", `Read ${cases.length} test(s) from Jira and Xray...`);
+        if (isCancelled()) {
+          break;
+        }
+      }
+      const missing = profile.xray.scope.issueKeys.filter((key) => !cases.some((c) => c.issue.key === key.trim().toUpperCase()));
+      missing.forEach((key) => logCase("warn", `${key} is not an Xray test of project ${xrayContext.project.key}, or does not match the JQL filter.`, key));
+      await readCalledTests(xrayContext, cases, context.called);
+      if (context.called.size > 0) {
+        logCase("info", `${context.called.size} test(s) are called by steps of other tests.`);
+      }
+      assets.register(cases);
+      return cases.map((raw) => ({ key: raw.issue.key, title: String(raw.issue.fields.summary ?? raw.issue.key), label: raw.issue.key, raw }));
+    },
+  };
 }
 
 type TrSourceCase = SourceCase & { raw: TrCase };

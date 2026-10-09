@@ -138,6 +138,46 @@ const CSV_STEPS: StepDef[] = [
   },
 ];
 
+const xrayConnected = (p: Profile) => {
+  const c = p.xray.connection;
+  return Boolean(c.clientId && hasSecret(c.clientSecret) && c.jiraUrl && c.jiraEmail && hasSecret(c.jiraApiToken));
+};
+
+const XRAY_STEPS: StepDef[] = [
+  {
+    key: "connections",
+    label: "Connections",
+    description: "Xray, Jira and Allure TestOps access",
+    icon: <IconPlugConnected size={16} />,
+    done: (p) => xrayConnected(p) && Boolean(p.testops.connection.endpoint && hasSecret(p.testops.connection.apiToken)),
+    render: () => <ConnectionsStep />,
+  },
+  {
+    key: "scope",
+    label: "Projects",
+    description: "Which tests and where",
+    icon: <IconTarget size={16} />,
+    done: (p) => Boolean(p.xray.scope.projectKey && p.testops.scope.projectId),
+    render: () => <ScopeStep />,
+  },
+  {
+    key: "structure",
+    label: "Folders",
+    description: "Folder levels → custom fields",
+    icon: <IconHierarchy2 size={16} />,
+    done: (p) => p.structure.levels.some(Boolean),
+    render: () => <StructureStep />,
+  },
+  {
+    key: "fields",
+    label: "Fields",
+    description: "Xray and Jira fields → Allure TestOps",
+    icon: <IconListDetails size={16} />,
+    done: (p) => p.fields.length > 0,
+    render: () => <FieldsStep />,
+  },
+];
+
 const COMMON_STEPS: StepDef[] = [
   {
     key: "options",
@@ -167,7 +207,8 @@ const COMMON_STEPS: StepDef[] = [
 ];
 
 function stepsFor(profile: Profile): StepDef[] {
-  return [...(profile.source === "csv" ? CSV_STEPS : TESTRAIL_STEPS), ...COMMON_STEPS];
+  const sourceSteps = profile.source === "csv" ? CSV_STEPS : profile.source === "xray" ? XRAY_STEPS : TESTRAIL_STEPS;
+  return [...sourceSteps, ...COMMON_STEPS];
 }
 
 export function ProfilePage() {

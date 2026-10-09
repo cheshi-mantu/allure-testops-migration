@@ -14,7 +14,8 @@ export class TargetResolver {
   private statuses: Promise<ToNamed[]> | null = null;
   private layerList: Promise<ToNamed[]> | null = null;
   private projectFields: Promise<ToNamed[]> | null = null;
-  private accounts: Promise<Set<string> | null> | null = null;
+  /** Username by username and by lower-case email. */
+  private accounts: Promise<Map<string, string> | null> | null = null;
   private roleList: Promise<ToNamed[]> | null = null;
 
   constructor(
@@ -80,16 +81,25 @@ export class TargetResolver {
   }
 
   /**
-   * The user name if the user exists. When the token cannot list users the name is used as is and
-   * a failed assignment is reported by the writer.
+   * The user name if the user exists; an email finds the account with that email (sources such as
+   * Jira know users by email). When the token cannot list users the name is used as is and a
+   * failed assignment is reported by the writer.
    */
   async owner(username: string): Promise<string | null> {
     this.accounts ??= this.client
       .accounts()
-      .then((list) => new Set(list.map((a) => a.username)))
+      .then((list) => {
+        const known = new Map<string, string>();
+        list.forEach((a) => a.email && known.set(a.email.toLowerCase(), a.username));
+        list.forEach((a) => known.set(a.username, a.username));
+        return known;
+      })
       .catch(() => null);
     const known = await this.accounts;
-    return known === null || known.has(username) ? username : null;
+    if (known === null) {
+      return username;
+    }
+    return known.get(username) ?? known.get(username.toLowerCase()) ?? null;
   }
 
   /** Roles are part of the instance configuration and are not created by the migration. */

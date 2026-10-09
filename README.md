@@ -1,6 +1,6 @@
 # Allure TestOps Migration
 
-A web tool that moves test cases into [Allure TestOps](https://qameta.io/) from **TestRail** or from any **CSV file**.
+A web tool that moves test cases into [Allure TestOps](https://qameta.io/) from **TestRail**, **Xray Cloud** or any **CSV file**.
 
 Everything is configured in the browser: connect the systems, map the source structure and fields to Allure TestOps using live data from both sides, preview a converted case, do a dry run, then migrate. Running the migration again updates the migrated cases instead of duplicating them.
 
@@ -22,6 +22,7 @@ Profiles and run logs are stored in the `migration-data` Docker volume. Use **Ex
 ## What you need
 
 - **TestRail**: the URL, a user email and an API key (*My Settings → API Keys*). The API must be enabled in *Administration → Site Settings → API*. Read access to the project is enough.
+- **Xray Cloud**: the Jira Cloud site, the email and an API token of an Atlassian account that can browse the project (*id.atlassian.com → Security → API tokens*), and an Xray API key: client id and client secret (*Jira → Apps → Xray → API Keys*).
 - **CSV**: the file. Exports from spreadsheets, other test management tools and Allure TestOps itself work.
 - **Allure TestOps**: the URL and an API token (*Your profile → API tokens*) of an account that can edit test cases in the target project. Listing users for owner mapping needs administrator rights; without them owners can still be typed in.
 
@@ -54,6 +55,40 @@ Profiles and run logs are stored in the `migration-data` Docker volume. Use **Ex
 | Links to other TestRail cases | Links to the migrated Allure TestOps cases |
 
 Every migrated case gets the tag `testrail:<case id>` (the prefix is configurable). Reruns find cases by this tag, so the tool can continue or refresh a migration, including one made with the previous command line migration tool when the same prefix and shared step names are used.
+
+## Xray Cloud
+
+Create a profile with *Xray Cloud* as the source. The steps are Connections, Projects, Folders, Fields, Options, Preview and Run.
+
+Xray keeps the details of a test (type, steps, Cucumber or generic definition, folder, preconditions, test sets and plans) and Jira keeps the issue (summary, description, all system and custom fields, comments, links, attachments), so the tool reads both: Jira through its REST API with the account's API token, Xray through its GraphQL API with the API key. The Xray API URL is `https://xray.cloud.getxray.app` for most sites; sites with data residency use their region (`us.`, `eu.` or `au.xray.cloud.getxray.app`).
+
+- **Projects.** The Jira project, an optional JQL filter (for example `labels = regression`) and an optional list of issue keys for a trial run. The tool finds the issue type Xray uses for tests in the project.
+- **Folders.** The folders of the test repository map to one custom field per level, like TestRail sections, including the tree.
+- **Fields.** Every attribute of the tests is listed with how often it is filled and example values from sampled tests, and gets a target of your choice:
+  - Xray: test type, steps of Manual tests, the definition of Cucumber and Generic tests, preconditions, test sets, test plans, the full folder path;
+  - Jira: description, environment, labels, priority, components, versions, assignee, reporter, status, dates, every custom field (text, select, multi-select, user, URL, number...), comments, and issue links by direction (`tests`, `is blocked by`...).
+  
+  Fields with a list of values show the values with counts; each can be renamed, pointed at an existing Allure TestOps value or skipped. Jira users are matched to Allure TestOps accounts by email.
+
+| Xray and Jira | Allure TestOps (suggested, can be changed) |
+| --- | --- |
+| Summary | Test case name |
+| Folder levels 1..N | One custom field per level, and a tree |
+| Steps (action, data, expected result, step custom fields, step files) | Scenario: step, data as a nested step, expected result, attachments |
+| Step calling another test | Shared step named `<key> <summary> [<issue id>]`, or the called steps copied in |
+| Cucumber scenario / Generic definition | Description (Gherkin in a code block), or the scenario, one step per line |
+| Preconditions | Precondition (several are listed with their keys) |
+| Test type, test sets, test plans | Custom fields |
+| Description, other rich text fields | Description, Markdown with images |
+| Labels | Tags |
+| Priority, components, versions, select fields | Custom fields, with value mapping |
+| Assignee | Owner, matched by email |
+| Requirements (`tests` links) | Issues of the Jira integration of the project |
+| Issue key | Link back to the issue (`Jira CALC-12`) and, optionally, a test key through an integration chosen on the Options step |
+| Comments | Comments |
+| Issue attachments, images in text | Test case attachments; images keep their place in text |
+
+Every migrated case gets the tag `xray:<issue key>`. Xray step text and definitions are converted from Jira wiki markup; step text becomes plain text, as Allure TestOps shows step text without formatting.
 
 ## CSV files
 
@@ -94,7 +129,7 @@ npm test             # unit tests and an end-to-end migration against fake serve
 Run locally with fake TestRail and Allure TestOps servers:
 
 ```bash
-npm run dev:mocks    # TestRail on :4001, Allure TestOps on :4002
+npm run dev:mocks    # TestRail on :4001, Allure TestOps on :4002, Jira and Xray Cloud on :4003
 npm run dev:server   # API and UI on :8080 (UI from packages/web/dist)
 npm run dev:web      # optional: UI with hot reload on :5173, proxies /api to :8080
 ```
@@ -106,16 +141,27 @@ docker compose -f dev-compose.yml up --build -d
 docker compose -f dev-compose.yml run --rm --build tests -d
 ```
 
-Fake server credentials: TestRail user `demo@example.com` with API key `demo-api-key`, Allure TestOps token `demo-api-token`. Inside `dev-compose.yml` use `http://mocks:4001` and `http://mocks:4002` as URLs; from the host use `http://localhost:4001` and `http://localhost:4002`.
+Fake server credentials: TestRail user `demo@example.com` with API key `demo-api-key`, Allure TestOps token `demo-api-token`. Inside `dev-compose.yml` use `http://mocks:4001` and `http://mocks:4002` as URLs; from the host use `http://localhost:4001` and `http://localhost:4002`. The fake Jira and Xray Cloud run on port 4003 (`http://mocks:4003` or `http://localhost:4003` for both the Jira site and the Xray API URL): Jira `demo@example.com` with token `demo-jira-token`, Xray client id `demo-client-id` and secret `demo-client-secret`.
+
+### Test data in a real Xray Cloud
+
+`dev/xray-seed.ts` fills a Jira Cloud project with Xray tests that cover what the migration reads: Manual tests with formatted steps, step files and called tests, Cucumber and Generic tests, preconditions (also more than ten on one test), folders, test sets and plans, labels, priorities, components, versions, descriptions with images and tables, comments, attachments and requirement links. It also creates about 30 realistic scenarios of a web shop, its API and mobile app (`dev/xray-seed-scenarios.ts`), and `--bulk N` adds N variations of them (browsers, locales, roles, negative input) for paging and speed. Manual tests vary in shape: steps as written, steps only, steps without expected results, one check at the end, and long tests of 15 to 25 steps with or without expected results; the label `shape-...` tells which. Everything it creates is labelled `atm-seed`, and `--cleanup --yes` deletes it again. The project needs the Xray issue types and Story.
+
+```bash
+export JIRA_URL=https://yourcompany.atlassian.net JIRA_EMAIL=you@example.com JIRA_API_TOKEN=...
+export XRAY_CLIENT_ID=... XRAY_CLIENT_SECRET=...   # XRAY_URL for regional sites
+npx tsx dev/xray-seed.ts --project KEY --bulk 300
+npx tsx dev/xray-seed.ts --project KEY --cleanup --yes
+```
 
 ### Layout
 
 ```
 packages/
   shared/   profile schema (zod), API types, default mappings, section level mapping
-  server/   Fastify API, TestRail and Allure TestOps clients, CSV reading, conversion, migration engine
+  server/   Fastify API, TestRail, Jira, Xray and Allure TestOps clients, CSV reading, conversion, migration engine
   web/      React + Mantine UI
-  mocks/    fake TestRail and Allure TestOps servers with a synthetic project
+  mocks/    fake TestRail, Jira with Xray Cloud, and Allure TestOps servers with synthetic projects
 ```
 
 The conversion is split into a pure transformation (`server/src/convert`), which turns a TestRail case into a planned Allure TestOps case and backs both the preview and the migration, and a writer (`server/src/engine/writer.ts`) that applies the plan idempotently.

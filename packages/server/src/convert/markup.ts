@@ -152,7 +152,7 @@ export function convertText(raw: string, options: TextOptions): ConvertedText {
 export function resolveAttachmentImages(text: string, urlFor: (sourceId: string) => string | null): string {
   return text.replace(PLANNED_IMAGE, (match, id: string) => {
     const url = urlFor(id);
-    return url ? match.replace(`${ATTACHMENT_SCHEME}${id}`, url) : `[TestRail attachment ${id} was not migrated]`;
+    return url ? match.replace(`${ATTACHMENT_SCHEME}${id}`, url) : `[Attachment ${id} was not migrated]`;
   });
 }
 

@@ -84,7 +84,7 @@ export interface SuiteStructure {
 
 /** What the mapping screens show about the source: structure, fields and sample cases. */
 export interface SourceDiscovery {
-  source: "testrail" | "csv";
+  source: "testrail" | "csv" | "xray";
   project: NamedId & { suiteMode: number };
   suites: NamedId[];
   structure: SuiteStructure[];
@@ -255,6 +255,8 @@ export interface PlannedCase {
   members: { name: string; role: string }[];
   links: { name: string; url: string }[];
   issues: { key: string; integrationId: number | null }[];
+  /** Keys of the case in a test management system known to Allure TestOps through an integration, e.g. an Xray test key. */
+  testKeys?: { key: string; integrationId: number }[];
   comments: string[];
   attachments: PlannedAttachment[];
   scenario: PlannedStep[];
@@ -321,11 +323,13 @@ export interface RunLogEntry {
 export interface ProfileListItem {
   id: string;
   name: string;
-  source: "testrail" | "csv";
+  source: "testrail" | "csv" | "xray";
   /** CSV: name of the chosen file. */
   fileName: string | null;
   updatedAt: string;
   testrailEndpoint: string;
+  /** Xray: Jira project key. */
+  xrayProject?: string;
   testopsEndpoint: string;
   lastRun: RunSummary | null;
 }
