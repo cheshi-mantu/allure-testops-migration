@@ -25,6 +25,10 @@ export interface SourceAssets {
   sharedStep(id: number): Promise<SharedStepContent>;
   /** How to fix attachment downloads that fail. */
   attachmentHint?: string;
+  /** Text left in place of an inline image that could not be migrated, e.g. a link to the file. */
+  missingImage?(sourceId: string): string | null;
+  /** Whether files of the source are downloaded; the "Migrate attachments" option when not set. */
+  downloadsFiles?: boolean;
 }
 
 /** Steps of a shared step; the field is `custom_steps_separated` unless the instance renamed it. */

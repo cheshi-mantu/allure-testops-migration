@@ -1,4 +1,5 @@
-import { mergeSuggestedMappings, type PlannedCase, type PlannedNote, type PlannedStep, type Profile, type SourceDiscovery, type SourceFieldInfo, type XmlFilePreview } from "@atm/shared";
+import { mergeSuggestedMappings, type ConnectionCheck, type PlannedAttachment, type PlannedCase, type PlannedNote, type PlannedStep, type Profile, type SourceDiscovery, type SourceFieldInfo, type XmlFilePreview } from "@atm/shared";
+import { ATTACHMENT_SCHEME, looksLikeHtml } from "../convert/markup.js";
 import { note } from "../convert/notes.js";
 import { buildStep } from "../convert/steps.js";
 import { columnFor, groupCases, type CsvCase } from "../csv/cases.js";
@@ -9,7 +10,9 @@ import { suggestColumns, type Suggestion } from "../csv/suggest.js";
 import { transformCsvCase } from "../csv/transform.js";
 import { CaseSkipped } from "../engine/errors.js";
 import { KnownProblem } from "../engine/problems.js";
+import type { RetryInfo } from "../http/httpClient.js";
 import type { FileStore } from "../storage/fileStore.js";
+import { otherHosts, XmlFiles } from "./files.js";
 import { readXml, type XmlDocument, type XmlRecord } from "./read.js";
 
 /**
@@ -27,9 +30,11 @@ const PATH_SEPARATOR = "\u0000";
 export interface LoadedXml {
   fileName: string;
   doc: XmlDocument;
+  /** Files the XML refers to, downloaded from the source system when the profile says so. */
+  xmlFiles: XmlFiles;
 }
 
-export async function loadXml(profile: Profile, files: FileStore): Promise<LoadedXml> {
+export async function loadXml(profile: Profile, files: FileStore, onRetry?: (info: RetryInfo) => void): Promise<LoadedXml> {
   const missing = (title: string) =>
     new KnownProblem({ key: "no-file", title, hint: "Upload the XML file or choose one from the library on the XML file step.", fix: { step: "file" } });
   if (!profile.xml.fileId) {
@@ -50,14 +55,11 @@ export async function loadXml(profile: Profile, files: FileStore): Promise<Loade
       fix: { step: "file" },
     });
   }
-  doc.records.forEach((record) => linkImages(record));
-  return { fileName: info.name, doc };
+  const xmlFiles = new XmlFiles(profile.xml.files, onRetry);
+  doc.records.forEach((record) => linkImages(record, xmlFiles, profile.options.textFormat));
+  return { fileName: info.name, doc, xmlFiles };
 }
 
-/**
- * Images in text refer to files the export does not contain. An image whose address is listed
- * among the record's URLs (e.g. its attachments) becomes a link with the file name; text stays readable.
- */
 /** URLs listed in a record with the name next to them, e.g. attachments with `name` and `url`. */
 function namedUrls(record: XmlRecord): { url: string; name: string | null }[] {
   const urls: { url: string; name: string | null }[] = [];
@@ -70,18 +72,37 @@ function namedUrls(record: XmlRecord): { url: string; name: string | null }[] {
   return urls;
 }
 
-function linkImages(record: XmlRecord): void {
+const IMAGE = /!\[([^\]]*)\]\(\s*([^)\s]+)[^)]*\)|<img\b[^>]*\bsrc=["']([^"']+)["'][^>]*>/gi;
+const escapeHtml = (text: string) => text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+
+/**
+ * Images in text refer to files the export does not contain. An image served by the source system
+ * is planned as an attachment that keeps its place in the text, when files are downloaded.
+ * Otherwise an image whose address is listed among the record's URLs (e.g. its attachments)
+ * becomes a link with the file name, so the text stays readable.
+ */
+function linkImages(record: XmlRecord, xmlFiles: XmlFiles, format: Profile["options"]["textFormat"]): void {
   const urls = namedUrls(record);
-  const link = (alt: string, source: string) => {
-    const known = urls.find((candidate) => candidate.url === source || (!/^https?:\/\//i.test(source) && candidate.url.endsWith(source)));
-    const address = known?.url ?? source;
-    const label = known?.name ?? (alt.trim() || "image");
-    return /^https?:\/\//i.test(address) ? `[${label}](${address})` : `[image: ${alt.trim() || source}]`;
+  const rewrite = (text: string) => {
+    // What replaces an image is written in the language of the text around it.
+    const html = format === "html" || (format === "auto" && looksLikeHtml(text.replace(/<img\b[^>]*>/gi, "")));
+    return text.replace(IMAGE, (_match, alt: string | undefined, markdownSource: string | undefined, htmlSource: string | undefined) => {
+      const source = (markdownSource ?? htmlSource)!;
+      const label = alt?.trim() ?? "";
+      const known = urls.find((candidate) => candidate.url === source || (!/^https?:\/\//i.test(source) && candidate.url.endsWith(source)));
+      const address = known?.url ?? source;
+      const file = xmlFiles.resolve(address);
+      if (file) {
+        const key = xmlFiles.register(file, known?.name ?? null);
+        return html ? `<img src="${ATTACHMENT_SCHEME}${key}" alt="${escapeHtml(label)}">` : `![${label}](${ATTACHMENT_SCHEME}${key})`;
+      }
+      if (!/^https?:\/\//i.test(address)) {
+        return `[image: ${label || source}]`;
+      }
+      const name = known?.name ?? (label || "image");
+      return html ? `<a href="${escapeHtml(address)}">${escapeHtml(name)}</a>` : `[${name}](${address})`;
+    });
   };
-  const rewrite = (text: string) =>
-    text
-      .replace(/!\[([^\]]*)\]\(\s*([^)\s]+)[^)]*\)/g, (_match, alt: string, source: string) => link(alt, source))
-      .replace(/<img\b[^>]*\bsrc=["']([^"']+)["'][^>]*>/gi, (_match, source: string) => link("", source));
   const has = (text: string) => text.includes("![") || /<img\b/i.test(text);
   for (const [field, values] of record.values) {
     if (values.some(has)) {
@@ -186,6 +207,9 @@ export function analyseFields(profile: Profile, doc: XmlDocument): { fieldsInfo:
       suggestion = { target: known.status ? { kind: "status" } : { kind: "customField", name: prettyName(field) } };
     } else if (field !== idField && TECHNICAL.test(field) && suggestion.target.kind === "customField") {
       suggestion = { target: { kind: "ignore" } };
+    } else if (suggestion.target.kind === "link" && /attach|file/i.test(field) && doc.fields.includes(field.replace(/[^/]+$/, "name"))) {
+      // Addresses of listed files: attached when files are downloaded, links otherwise.
+      suggestion = { target: { kind: "attachment" } };
     } else if (last === "name" && doc.fields.includes(field.replace(/[^/]+$/, "url"))) {
       // The names of listed files become the names of their links.
       suggestion = { target: { kind: "ignore" } };
@@ -290,10 +314,11 @@ export async function discoverXml(profile: Profile, files: FileStore): Promise<S
  * the CSV transform; the scenario comes from the step list or, when a case has none, from a text
  * field mapped to the scenario.
  */
-export function transformXmlCase(testCase: XmlCase, profile: Profile, doc: XmlDocument): { planned: PlannedCase; linkedCaseIds: string[] } {
+export function transformXmlCase(testCase: XmlCase, profile: Profile, doc: XmlDocument, xmlFiles: XmlFiles): { planned: PlannedCase; linkedCaseIds: string[] } {
   const scenarioMappings = profile.fields.filter((mapping) => mapping.target.kind === "scenario");
+  const fileMappings = profile.fields.filter((mapping) => mapping.target.kind === "attachment");
   const fields = profile.fields.map((mapping) =>
-    mapping.target.kind === "scenario" || mapping.target.kind === "scenarioExpected" ? { ...mapping, target: { kind: "ignore" as const } } : mapping,
+    ["scenario", "scenarioExpected", "attachment"].includes(mapping.target.kind) ? { ...mapping, target: { kind: "ignore" as const } } : mapping,
   );
   const tabular: Profile = { ...profile, fields, csv: { ...profile.csv, pathColumn: PATH_COLUMN, steps: profile.xml.steps } };
   // The transform speaks of columns; an XML file has fields.
@@ -331,7 +356,111 @@ export function transformXmlCase(testCase: XmlCase, profile: Profile, doc: XmlDo
     }
     planned.scenario = steps;
   }
+
+  // Files: listed in fields mapped to Attachments, and images inside text and steps.
+  const addFile = (key: string) => {
+    if (!planned.attachments.some((attachment) => attachment.sourceId === key)) {
+      planned.attachments.push({ sourceId: key, fileName: xmlFiles.nameOf(key) });
+    }
+  };
+  for (const mapping of fileMappings) {
+    for (const value of testCase.record.values.get(mapping.source) ?? []) {
+      const file = /\s/.test(value) ? null : xmlFiles.resolve(value);
+      if (file) {
+        addFile(xmlFiles.register(file, names.get(value) ?? null));
+      } else if (/^https?:\/\/\S+$/i.test(value)) {
+        // Not downloaded: the address is kept as a link.
+        planned.links.push({ name: names.get(value) ?? value, url: value });
+      } else {
+        notes.push(note.linkNotUrl(value, mapping.source));
+      }
+    }
+  }
+  const inText = [planned.description, planned.precondition, planned.expectedResult, ...planned.comments].flatMap((text) => [...text.matchAll(PLANNED_FILE)].map((match) => match[1]!));
+  inText.filter((key) => xmlFiles.has(key)).forEach(addFile);
+  if (inText.every((key) => xmlFiles.has(key))) {
+    planned.notes = notes.filter((entry) => entry.code !== "csv-testrail-images");
+  }
+  liftStepImages(planned.scenario, xmlFiles);
   return { planned, linkedCaseIds: [] };
+}
+
+const PLANNED_FILE = new RegExp(`!\\[[^\\]]*\\]\\(${ATTACHMENT_SCHEME}([A-Za-z0-9-]+)\\)`, "g");
+
+/** Step text is plain: images inside it become attachments of the step, named after their files. */
+function liftStepImages(steps: PlannedStep[], xmlFiles: XmlFiles): void {
+  const lift = (text: string | null, attachments: PlannedAttachment[]): string | null => {
+    if (!text || !text.includes(ATTACHMENT_SCHEME)) {
+      return text;
+    }
+    for (const match of text.matchAll(PLANNED_FILE)) {
+      if (!attachments.some((attachment) => attachment.sourceId === match[1])) {
+        attachments.push({ sourceId: match[1]!, fileName: "" });
+      }
+    }
+    return text.replace(PLANNED_FILE, "").replace(/\n{3,}/g, "\n\n").trim();
+  };
+  for (const step of steps) {
+    if (step.type !== "step") {
+      continue;
+    }
+    step.body = lift(step.body, step.attachments) || (step.attachments.length > 0 ? "See attachment" : "");
+    step.data = lift(step.data, step.dataAttachments);
+    step.expected = lift(step.expected, step.expectedAttachments);
+    for (const attachment of [...step.attachments, ...step.dataAttachments, ...step.expectedAttachments]) {
+      if (attachment.sourceId !== null && xmlFiles.has(attachment.sourceId)) {
+        attachment.fileName = xmlFiles.nameOf(attachment.sourceId);
+      }
+    }
+    liftStepImages(step.steps ?? [], xmlFiles);
+  }
+}
+
+/** "Test download" on the Connection step: reads the first file the XML refers to at the source system. */
+export async function checkXmlFiles(profile: Profile, files: FileStore): Promise<ConnectionCheck> {
+  const fail = (message: string): ConnectionCheck => ({ ok: false, message });
+  if (!profile.xml.files.download) {
+    return fail("Turn on \"Download attached files\" first.");
+  }
+  const { doc, xmlFiles } = await loadXml(profile, files);
+  if (!xmlFiles.enabled) {
+    return fail("Enter the address of the source system, starting with http:// or https://.");
+  }
+  const { effective } = analyseFields(profile, doc);
+  const fileFields = effective.fields.filter((mapping) => mapping.target.kind === "attachment").map((mapping) => mapping.source);
+  const linkFields = effective.fields.filter((mapping) => mapping.target.kind === "link").map((mapping) => mapping.source);
+  // Addresses at the source system in fields mapped to Links: probably files, but nothing says so.
+  const asLinks = linkFields.filter((field) => doc.records.some((record) => (record.values.get(field) ?? []).some((value) => /^https?:\/\/\S+$/i.test(value) && xmlFiles.resolve(value))));
+  const listed: string[] = [];
+  for (const record of doc.records) {
+    const names = new Map(namedUrls(record).map((entry) => [entry.url, entry.name]));
+    listed.push(...namedUrls(record).map((entry) => entry.url));
+    for (const field of fileFields) {
+      for (const value of record.values.get(field) ?? []) {
+        const file = /\s/.test(value) ? null : xmlFiles.resolve(value);
+        if (file) {
+          xmlFiles.register(file, names.get(value) ?? null);
+        }
+      }
+    }
+  }
+  const elsewhere = otherHosts(listed, xmlFiles.origin);
+  const others =
+    (elsewhere.length > 0 ? ` Addresses at ${elsewhere.slice(0, 3).join(", ")} are not downloaded and stay links.` : "") +
+    (asLinks.length > 0 ? ` ${asLinks.join(", ")} also holds addresses at this system but is mapped to Links: map it to Attachments on the Fields step to download those files.` : "");
+  const keys = xmlFiles.keys;
+  if (keys.length === 0) {
+    return fail(
+      `The file refers to no files at ${xmlFiles.origin}: no field mapped to Attachments holds such addresses and the text has no such images.${others || " Check that the address is the one the addresses in the file start with."}`,
+    );
+  }
+  try {
+    const file = await xmlFiles.download(keys[0]!);
+    const size = file.data.length < 1024 * 1024 ? `${Math.max(1, Math.round(file.data.length / 1024))} KB` : `${(file.data.length / 1024 / 1024).toFixed(1)} MB`;
+    return { ok: true, message: `Downloaded "${file.fileName}" (${size}). The file refers to ${keys.length} file(s) at ${xmlFiles.origin}.${others}` };
+  } catch (error) {
+    return fail(`${error instanceof Error ? error.message : String(error)}.`);
+  }
 }
 
 /** The name field must be mapped before anything can be imported. */

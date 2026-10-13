@@ -26,8 +26,12 @@ function classicName(systemName: string): string {
   return systemName.replace(/^custom_case_/, "custom_");
 }
 
-/** Field targets that make sense for a TestRail field, most natural first. */
+/** Field targets that make sense for a source field: "Do not migrate" first, then the most natural ones. */
 export function allowedTargets(field: TestRailFieldInfo): FieldTarget["kind"][] {
+  return ["ignore", ...targetsOf(field).filter((kind) => kind !== "ignore")];
+}
+
+function targetsOf(field: TestRailFieldInfo): FieldTarget["kind"][] {
   switch (field.kind) {
     case "column":
       return [
@@ -45,6 +49,7 @@ export function allowedTargets(field: TestRailFieldInfo): FieldTarget["kind"][] 
         "owner",
         "role",
         "link",
+        "attachment",
         "issue",
         "comment",
         "allureId",

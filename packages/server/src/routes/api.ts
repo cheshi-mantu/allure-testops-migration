@@ -31,7 +31,7 @@ import { HttpError } from "../http/httpClient.js";
 import { prepareSource } from "../engine/sources.js";
 import type { FileStore } from "../storage/fileStore.js";
 import { checkTestOps, checkTestRail, checkXray } from "./checks.js";
-import { discoverXml, previewXml } from "../xml/source.js";
+import { checkXmlFiles, discoverXml, previewXml } from "../xml/source.js";
 import { discoverXray, loadXrayContext, readCalledTests, readXrayCase } from "../xray/discovery.js";
 import { transformXrayCase } from "../xray/transform.js";
 
@@ -186,6 +186,7 @@ export async function registerApi(app: FastifyInstance, deps: ApiDeps): Promise<
   app.post<{ Params: { id: string } }>("/api/profiles/:id/testrail/check", async (request) => checkTestRail(await load(request.params.id)));
   app.post<{ Params: { id: string } }>("/api/profiles/:id/testops/check", async (request) => checkTestOps(await load(request.params.id)));
   app.post<{ Params: { id: string } }>("/api/profiles/:id/xray/check", async (request) => checkXray(await load(request.params.id)));
+  app.post<{ Params: { id: string } }>("/api/profiles/:id/xml/files/check", async (request) => checkXmlFiles(await load(request.params.id), files));
 
   app.get<{ Params: { id: string } }>("/api/profiles/:id/testrail/suites", async (request) => {
     const profile = await load(request.params.id);

@@ -129,6 +129,9 @@ function warnings(profile: Profile, sourceDepth: number | null): string[] {
   if (profile.fields.some((m) => m.target.kind === "role" && !m.target.role)) {
     list.push(`A ${profile.source === "csv" ? "column" : "field"} maps to members without a role; those members will be skipped.`);
   }
+  if (profile.source === "xml" && profile.xml.files.download && !/^https?:\/\/\S+/i.test(profile.xml.files.endpoint.trim())) {
+    list.push("Attached files will not be downloaded: the address of the source system is not set (Connection).");
+  }
   if (profile.fields.some((m) => m.target.kind === "issue" && m.target.integrationId === null)) {
     list.push("A field maps to issues without an issue tracker integration; those issues will be skipped.");
   }
@@ -384,7 +387,7 @@ export function RunStep() {
       <Modal opened={confirm} onClose={() => setConfirm(false)} title="Start the migration?">
         <Stack>
           <Text size="sm">
-            Test cases and custom fields{isFileSource(profile.source) ? "" : ", shared steps and attachments"} will be created or updated in
+            Test cases and custom fields{profile.source === "xml" && profile.xml.files.download ? " and attachments" : isFileSource(profile.source) ? "" : ", shared steps and attachments"} will be created or updated in
             Allure TestOps project #{profile.testops.scope.projectId}.{" "}
             {profile.source === "testrail" ? "TestRail is only read." : profile.source === "xray" ? "Jira and Xray are only read." : "The file is not changed."}
           </Text>

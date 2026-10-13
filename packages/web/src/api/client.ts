@@ -62,6 +62,7 @@ export const api = {
   checkTestRail: (id: string) => request<CheckResult>("POST", `/api/profiles/${id}/testrail/check`),
   checkTestOps: (id: string) => request<CheckResult>("POST", `/api/profiles/${id}/testops/check`),
   checkXray: (id: string) => request<CheckResult>("POST", `/api/profiles/${id}/xray/check`),
+  checkXmlFiles: (id: string) => request<ConnectionCheck>("POST", `/api/profiles/${id}/xml/files/check`),
   testRailSuites: (id: string) => request<{ suiteMode: number; suites: NamedId[] }>("GET", `/api/profiles/${id}/testrail/suites`),
   discoverSource: (id: string) => request<SourceDiscovery>("POST", `/api/profiles/${id}/source/discover`),
   csvPreview: (id: string) => request<CsvFilePreview>("GET", `/api/profiles/${id}/csv/preview`),

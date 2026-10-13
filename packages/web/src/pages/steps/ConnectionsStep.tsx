@@ -2,11 +2,11 @@ import { Alert, Anchor, Autocomplete, Button, Card, Collapse, Group, NumberInput
 import { IconAlertCircle, IconCircleCheck } from "@tabler/icons-react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
-import { isFileSource, SECRET_MASK, TESTRAIL_RATE_LIMITS, XRAY_REGIONS, type TestRailConnection } from "@atm/shared";
+import { SECRET_MASK, TESTRAIL_RATE_LIMITS, XRAY_REGIONS, type TestRailConnection, type XmlFiles } from "@atm/shared";
 import { api, errorText, type CheckResult } from "../../api/client";
 import { useProfile } from "../../components/ProfileContext";
 
-function CheckAlert({ result, error }: { result?: CheckResult; error: unknown }) {
+function CheckAlert({ result, error }: { result?: Pick<CheckResult, "ok" | "message">; error: unknown }) {
   if (error) {
     return <Alert color="red" icon={<IconAlertCircle size={16} />}>{errorText(error)}</Alert>;
   }
@@ -69,7 +69,7 @@ export function ConnectionsStep() {
       <Text c="dimmed">
         Credentials are stored only in this tool's data volume and are never included in an export unless you ask for it.
       </Text>
-      <SimpleGrid cols={{ base: 1, lg: isFileSource(profile.source) ? 1 : 2 }} maw={isFileSource(profile.source) ? 640 : undefined}>
+      <SimpleGrid cols={{ base: 1, lg: profile.source === "csv" ? 1 : 2 }} maw={profile.source === "csv" ? 640 : undefined}>
         {profile.source === "xray" && <XrayConnectionCard />}
         {profile.source === "testrail" && (
         <Card withBorder>
@@ -209,8 +209,110 @@ export function ConnectionsStep() {
             <CheckAlert result={checkTestOps.data} error={checkTestOps.error} />
           </Stack>
         </Card>
+        {profile.source === "xml" && <XmlFilesCard />}
       </SimpleGrid>
     </Stack>
+  );
+}
+
+const FILE_AUTH: { value: XmlFiles["auth"]; label: string }[] = [
+  { value: "basic", label: "User and password or API key" },
+  { value: "header", label: "Request header, e.g. a token or a cookie" },
+  { value: "none", label: "No authentication" },
+];
+
+/** An XML file holds addresses of attached files, not the files: optional access to the system that serves them. */
+function XmlFilesCard() {
+  const { profile, update, flush } = useProfile();
+  const settings = profile.xml.files;
+  const check = useMutation({
+    mutationFn: async () => {
+      await flush();
+      return api.checkXmlFiles(profile.id);
+    },
+  });
+  const set = <K extends keyof XmlFiles>(key: K, value: XmlFiles[K]) => update((p) => void (p.xml.files[key] = value));
+  const endpoint = settings.endpoint.trim();
+  const endpointError = settings.download && endpoint !== "" && !/^https?:\/\/\S+/i.test(endpoint) ? "Start the address with http:// or https://" : undefined;
+
+  return (
+    <Card withBorder>
+      <Stack>
+        <Title order={4}>Attached files (optional)</Title>
+        <Text size="sm" c="dimmed">
+          An XML file holds the addresses of attached files and of images inside text, not the files. Without this they stay links to
+          the source system. With it the files are downloaded and attached to the cases, and images keep their place in the text.
+        </Text>
+        <Switch
+          label="Download attached files"
+          description="Files listed in fields mapped to Attachments on the Fields step, and images inside text and steps."
+          checked={settings.download}
+          onChange={(e) => set("download", e.currentTarget.checked)}
+        />
+        {settings.download && (
+          <>
+            <TextInput
+              label="Address of the source system"
+              description="Files are downloaded only from this address, and the credentials below are sent only to it. Addresses on other hosts stay links."
+              placeholder="https://yourcompany.testrail.io/"
+              value={settings.endpoint}
+              error={endpointError}
+              onChange={(e) => set("endpoint", e.currentTarget.value)}
+            />
+            <Select
+              label="Authentication"
+              allowDeselect={false}
+              data={FILE_AUTH}
+              value={settings.auth}
+              onChange={(value) => value && set("auth", value as XmlFiles["auth"])}
+            />
+            {settings.auth === "basic" && (
+              <SimpleGrid cols={{ base: 1, sm: 2 }}>
+                <TextInput label="User" placeholder="you@example.com" value={settings.username} onChange={(e) => set("username", e.currentTarget.value)} />
+                <PasswordInput
+                  label="Password or API key"
+                  description="For TestRail: the user email and an API key from My Settings → API Keys."
+                  inputWrapperOrder={["label", "input", "description", "error"]}
+                  placeholder={secretPlaceholder(settings.password)}
+                  value={secretValue(settings.password)}
+                  onChange={(e) => set("password", e.currentTarget.value)}
+                />
+              </SimpleGrid>
+            )}
+            {settings.auth === "header" && (
+              <SimpleGrid cols={{ base: 1, sm: 2 }}>
+                <TextInput label="Header name" placeholder="Authorization" value={settings.headerName} onChange={(e) => set("headerName", e.currentTarget.value)} />
+                <PasswordInput
+                  label="Header value"
+                  description='For example "Bearer <token>", or a session cookie for the header Cookie.'
+                  inputWrapperOrder={["label", "input", "description", "error"]}
+                  placeholder={secretPlaceholder(settings.headerValue)}
+                  value={secretValue(settings.headerValue)}
+                  onChange={(e) => set("headerValue", e.currentTarget.value)}
+                />
+              </SimpleGrid>
+            )}
+            <Switch
+              label="Skip TLS certificate verification"
+              description="For servers with self-signed certificates."
+              checked={settings.insecureTls}
+              onChange={(e) => set("insecureTls", e.currentTarget.checked)}
+            />
+            <Group>
+              <Button variant="light" loading={check.isPending} disabled={!profile.xml.fileId} onClick={() => check.mutate()}>
+                Test download
+              </Button>
+              {!profile.xml.fileId && (
+                <Text size="sm" c="dimmed">
+                  Choose the XML file first: the test downloads the first file it refers to.
+                </Text>
+              )}
+            </Group>
+            <CheckAlert result={check.data} error={check.error} />
+          </>
+        )}
+      </Stack>
+    </Card>
   );
 }
 

@@ -149,10 +149,15 @@ export function convertText(raw: string, options: TextOptions): ConvertedText {
 }
 
 /** Points planned image references at uploaded attachments; unknown ones are dropped with their id kept as text. */
-export function resolveAttachmentImages(text: string, urlFor: (sourceId: string) => string | null): string {
+export function resolveAttachmentImages(
+  text: string,
+  urlFor: (sourceId: string) => string | null,
+  /** What is written in place of an image that was not uploaded; a note with its id when not given. */
+  missing: (sourceId: string) => string | null = () => null,
+): string {
   return text.replace(PLANNED_IMAGE, (match, id: string) => {
     const url = urlFor(id);
-    return url ? match.replace(`${ATTACHMENT_SCHEME}${id}`, url) : `[Attachment ${id} was not migrated]`;
+    return url ? match.replace(`${ATTACHMENT_SCHEME}${id}`, url) : (missing(id) ?? `[Attachment ${id} was not migrated]`);
   });
 }
 

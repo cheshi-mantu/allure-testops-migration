@@ -56,7 +56,7 @@ export async function prepareSource(profile: Profile, deps: SourceDeps, log: Log
     case "csv":
       return prepareCsv(profile, deps, log);
     case "xml":
-      return prepareXml(profile, deps, log);
+      return prepareXml(profile, deps, log, onRetry);
     case "xray":
       return prepareXray(profile, log, onRetry);
     default:
@@ -66,9 +66,14 @@ export async function prepareSource(profile: Profile, deps: SourceDeps, log: Log
 
 type XmlSourceCase = SourceCase & { raw: XmlCase };
 
-async function prepareXml(profile: Profile, deps: SourceDeps, log: Log): Promise<PreparedSource<XmlSourceCase>> {
+async function prepareXml(profile: Profile, deps: SourceDeps, log: Log, onRetry?: (info: RetryInfo) => void): Promise<PreparedSource<XmlSourceCase>> {
   requireNameField(profile);
-  const { doc, fileName } = await loadXml(profile, deps.files);
+  const { doc, fileName, xmlFiles } = await loadXml(profile, deps.files, onRetry);
+  if (xmlFiles.enabled) {
+    log("info", `Attached files and images are downloaded from ${xmlFiles.origin}.`);
+  } else if (profile.xml.files.download) {
+    log("warn", "Attached files are not downloaded: the address of the source system is not set (Connection step).");
+  }
   doc.warnings.forEach((warning) => log("warn", warning));
   const { cases, warnings } = xmlCases(doc, profile);
   warnings.forEach((warning) => log("warn", warning));
@@ -76,9 +81,9 @@ async function prepareXml(profile: Profile, deps: SourceDeps, log: Log): Promise
   log("info", `File "${fileName}": ${cases.length} "${doc.caseElement}" element(s)${lists ? `, steps in ${lists}` : ""}.`);
   return {
     name: "XML",
-    assets: noAssets,
+    assets: xmlFiles.enabled ? xmlFiles : noAssets,
     testrail: null,
-    transform: (testCase) => transformXmlCase(testCase.raw, profile, doc),
+    transform: (testCase) => transformXmlCase(testCase.raw, profile, doc, xmlFiles),
     readCases: async () => {
       const all = cases.map((raw) => ({ key: raw.key, title: raw.name || `line ${raw.line}`, line: raw.line, raw }));
       // A trial run on a few cases, chosen by id or name.

@@ -140,7 +140,7 @@ const CSV_STEPS: StepDef[] = [
 ];
 
 const XML_STEPS: StepDef[] = [
-  CSV_STEPS[0]!,
+  { ...CSV_STEPS[0]!, description: "Allure TestOps access, attached files" },
   {
     key: "file",
     label: "XML file",

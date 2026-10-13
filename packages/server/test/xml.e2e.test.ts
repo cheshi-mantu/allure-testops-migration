@@ -1,4 +1,5 @@
 import { readFile, mkdtemp, rm } from "node:fs/promises";
+import { createServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AddressInfo } from "node:net";
@@ -10,7 +11,7 @@ import { RunManager } from "../src/engine/runner.js";
 import { FileStore } from "../src/storage/fileStore.js";
 import { RunStore } from "../src/storage/runs.js";
 import { discoverTestOps } from "../src/testops/discovery.js";
-import { discoverXml, previewXml } from "../src/xml/source.js";
+import { checkXmlFiles, discoverXml, previewXml } from "../src/xml/source.js";
 
 const fixture = (name: string) => readFile(fileURLToPath(new URL(`./fixtures/${name}`, import.meta.url)));
 
@@ -83,7 +84,8 @@ describe("XML to Allure TestOps migration", () => {
       "custom/steps": { kind: "scenario" },
       "custom/expected": { kind: "expectedResult" },
       "custom/testrail_bdd_scenario/scenario/content": { kind: "scenario" },
-      "attachments/url": { kind: "link" },
+      // Kept as links until files are downloaded from the source system.
+      "attachments/url": { kind: "attachment" },
       "attachments/name": { kind: "ignore" },
       "attachments/id": { kind: "ignore" },
       is_converted: { kind: "ignore" },
@@ -169,6 +171,94 @@ describe("XML to Allure TestOps migration", () => {
     const wrong = state.testCases.find((tc) => tc.name === "Wrong password")!;
     expect(cf(wrong, "Feature")).toEqual(["Errors"]);
     expect(cf(wrong, "Importance")).toEqual(["Medium"]);
+  });
+
+  describe("with attached files downloaded from the source system", () => {
+    const PNG = Buffer.from("89504e470d0a1a0a0000000d49484452", "hex");
+    const requests: string[] = [];
+    let source: Server;
+    let origin: string;
+
+    beforeAll(async () => {
+      // A source system like TestRail: the API serves files to a user with a key, the page address shows a login page.
+      source = createServer((request, response) => {
+        requests.push(request.url ?? "");
+        const file = /^\/index\.php\?\/api\/v2\/get_attachment\/(\d+)$/.exec(request.url ?? "")?.[1];
+        if (!file) {
+          response.writeHead(200, { "content-type": "text/html" }).end("<html><body>Log in</body></html>");
+        } else if (request.headers.authorization !== `Basic ${Buffer.from("jane@example.com:key-1").toString("base64")}`) {
+          response.writeHead(401, { "content-type": "application/json" }).end('{"error":"Authentication failed"}');
+        } else if (file === "501") {
+          response.writeHead(200, { "content-type": "image/png" }).end(PNG);
+        } else {
+          response.writeHead(200, { "content-type": "text/csv" }).end("a,b\n1,2\n");
+        }
+      });
+      await new Promise<void>((resolve) => source.listen(0, "127.0.0.1", resolve));
+      origin = `http://127.0.0.1:${(source.address() as AddressInfo).port}`;
+    });
+
+    afterAll(() => new Promise((resolve) => source.close(resolve)));
+
+    async function profileWithFiles(id: string, password: string): Promise<Profile> {
+      const xml = (await fixture("testrail-export.xml")).toString("utf8").replaceAll("https://testrail.example.com", origin);
+      const file = await files.save(`${id}.xml`, Buffer.from(xml));
+      const profile = await profileFor("testrail-export.xml", id);
+      profile.xml.fileId = file.id;
+      profile.options.migrationTagPrefix = id;
+      profile.xml.files = { ...profile.xml.files, download: true, endpoint: origin, auth: "basic", username: "jane@example.com", password };
+      const discovery = await discoverXml(profile, files);
+      profile.fields = mergeSuggestedMappings([], discovery.fields, await discoverTestOps(profile));
+      return profile;
+    }
+
+    it("attaches listed files and keeps images in their place in text", async () => {
+      const profile = await profileWithFiles("files", "key-1");
+      expect(await checkXmlFiles(profile, files)).toMatchObject({ ok: true, message: expect.stringContaining('Downloaded "screenshot.png"') });
+
+      requests.length = 0;
+      const summary = await run(profile);
+      expect(summary.counters).toMatchObject({ created: 4, failed: 0 });
+      expect(summary.problems?.map((problem) => problem.code)).not.toContain("attachment-download");
+
+      const reset = byTag("files:C11");
+      // The third file is the table of step data, which the tool writes itself.
+      expect(reset.attachments.map((a) => a.name).sort()).toEqual(["screenshot.png", "step-3-data-table-1.csv", "test-data.csv"]);
+      const image = reset.attachments.find((a) => a.name === "screenshot.png")!;
+      expect(reset.precondition).toContain(`![](/api/rs/testcase/attachment/${image.id}/content)`);
+      expect(reset.links).toEqual([]);
+      // Files are asked for by their API address, with the credentials, and only at the source system.
+      expect(requests.every((url) => url.startsWith("/index.php?/api/v2/get_attachment/"))).toBe(true);
+
+      const again = await run(profile);
+      expect(again.counters).toMatchObject({ created: 0, updated: 4, failed: 0 });
+      expect(byTag("files:C11").attachments).toHaveLength(3);
+    });
+
+    it("migrates the cases and explains when the files cannot be downloaded", async () => {
+      const profile = await profileWithFiles("nofiles", "wrong");
+      const check = await checkXmlFiles(profile, files);
+      expect(check.ok).toBe(false);
+      expect(check.message).toMatch(/401/);
+
+      const summary = await run(profile);
+      expect(summary.counters).toMatchObject({ created: 4, failed: 0 });
+      const problem = summary.problems?.find((entry) => entry.code === "attachment-download");
+      expect(problem).toMatchObject({ fix: { step: "connections" }, hint: expect.stringContaining("Attached files") });
+      expect(byTag("nofiles:C11").attachments.map((a) => a.name)).toEqual(["step-3-data-table-1.csv"]);
+      // The image stays a link, as without downloads.
+      expect(byTag("nofiles:C11").precondition).toContain(`[screenshot.png](${origin}/index.php?/attachments/get/501)`);
+    });
+
+    it("never sends the credentials to another host", async () => {
+      const profile = await profileWithFiles("elsewhere", "key-1");
+      profile.xml.files.endpoint = "https://files.example.com";
+      requests.length = 0;
+      expect(await checkXmlFiles(profile, files)).toMatchObject({ ok: false, message: expect.stringContaining("refers to no files at https://files.example.com") });
+      const summary = await run(profile, true);
+      expect(summary.counters).toMatchObject({ failed: 0 });
+      expect(requests).toEqual([]);
+    });
   });
 
   it("explains a file that is not XML", async () => {

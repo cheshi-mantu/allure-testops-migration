@@ -173,6 +173,27 @@ export type CsvStepFormat = (typeof CSV_STEP_FORMATS)[number];
  * How an XML export is read. The structure is found in the file: the element that repeats per test
  * case, the named elements around it (suites, sections, folders) and the list of steps inside it.
  */
+export const XML_FILE_AUTH = ["basic", "header", "none"] as const;
+
+/**
+ * An XML file holds the addresses of attached files and images, not the files. With `download` on,
+ * they are read from the system that serves them and attached to the cases.
+ */
+export const XmlFilesSchema = z.object({
+  download: z.boolean().default(false),
+  /** Address of the system that serves the files. Files are downloaded only from it; credentials go nowhere else. */
+  endpoint: z.string().default(""),
+  auth: z.enum(XML_FILE_AUTH).default("basic"),
+  username: z.string().default(""),
+  /** Password or API key of the user. */
+  password: z.string().default(""),
+  /** `header` authentication: a request header such as `Authorization: Bearer ...` or `Cookie: ...`. */
+  headerName: z.string().default("Authorization"),
+  headerValue: z.string().default(""),
+  insecureTls: z.boolean().default(false),
+});
+export type XmlFiles = z.infer<typeof XmlFilesSchema>;
+
 export const XmlSourceSchema = z.object({
   /** File in the tool's file library (data volume). */
   fileId: z.string().nullable().default(null),
@@ -188,6 +209,7 @@ export const XmlSourceSchema = z.object({
       expectedPattern: z.string().default(""),
     })
     .prefault({}),
+  files: XmlFilesSchema.prefault({}),
 });
 export type XmlSource = z.infer<typeof XmlSourceSchema>;
 
@@ -202,6 +224,8 @@ export const FieldTargetSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("status") }),
   z.object({ kind: z.literal("owner") }),
   z.object({ kind: z.literal("link") }),
+  /** XML: addresses of files to attach to the case; they stay links when files are not downloaded. */
+  z.object({ kind: z.literal("attachment") }),
   z.object({ kind: z.literal("issue"), integrationId: z.number().int().positive().nullable().default(null) }),
   z.object({
     kind: z.enum(TEXT_TARGETS),
@@ -299,6 +323,8 @@ export const SECRET_PATHS = [
   ["testrail", "connection", "sessionCookie"],
   ["xray", "connection", "clientSecret"],
   ["xray", "connection", "jiraApiToken"],
+  ["xml", "files", "password"],
+  ["xml", "files", "headerValue"],
   ["testops", "connection", "apiToken"],
 ] as const;
 

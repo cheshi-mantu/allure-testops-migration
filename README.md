@@ -118,7 +118,9 @@ There is one XML source for every tool. The file is read by its structure, not b
 - **Mapping.** Every field gets a suggested target from its name and content, the same way as CSV columns, and fields with a short list of values show all values with counts for renaming or skipping. Technical values (internal ids, order numbers) are set to *Do not migrate*. Numeric codes of known exports are translated as a first suggestion, for example TestLink importance `3` to `High`.
 - **Reruns.** Cases are tagged `<prefix>:<case id>` with the id as it is written in the file, for example `xml-regression:C1697`, or a hash of the name when the file has no id.
 
-XML files carry text only. Links to attached files are kept as links named after the file; images inside text become links to their address when the file lists it. The files themselves and shared steps are not part of this source: to keep them, migrate from the tool directly when the tool has its own source here.
+- **Attached files.** An XML file holds the addresses of attached files and of images inside text, not the files. By default a field with such addresses (suggested target *Attachments*) gives links named after the files, and images in text become links. To attach the files themselves, turn on *Download attached files* on the Connection step and enter the address of the source system with a user and password or API key, or a request header. Files listed in fields mapped to *Attachments* are then downloaded and attached to the cases, and images keep their place in text and steps. *Test download* reads the first file the XML refers to and says what is wrong when it cannot. Files are downloaded only from the address you enter and the credentials are sent only to it; addresses on other hosts stay links. A file that cannot be downloaded does not stop the migration: the case is migrated, the run lists the problem, and running again adds the file.
+
+Shared steps are not part of this source.
 
 ## TestRail API rate limit
 

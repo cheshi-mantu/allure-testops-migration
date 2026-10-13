@@ -43,6 +43,7 @@ const TARGET_LABELS: Record<FieldTargetKind, string> = {
   status: "Status",
   owner: "Owner",
   link: "Links",
+  attachment: "Attachments (files by their address)",
   issue: "Issues",
   description: "Description",
   precondition: "Precondition",
@@ -404,7 +405,7 @@ function FieldRow({
               searchable
               data={allowedTargets(field)
                 // Steps of an XML file carry their expected results themselves.
-                .filter((kind) => !(xml && kind === "scenarioExpected"))
+                .filter((kind) => (xml ? kind !== "scenarioExpected" : kind !== "attachment"))
                 .map((kind) => ({ value: kind, label: TARGET_LABELS[kind] }))}
               value={target.kind}
               allowDeselect={false}
@@ -456,6 +457,13 @@ function FieldRow({
               />
             )}
             {target.kind === "scenario" && field.kind === "column" && <StepFormatSettings />}
+            {target.kind === "attachment" && (
+              <Text size="xs" c="dimmed">
+                {profile.xml.files.download
+                  ? `The files at these addresses are downloaded from ${profile.xml.files.endpoint.trim() || "the source system (set its address on the Connection step)"} and attached to the case. Addresses on other hosts stay links.`
+                  : "The file holds only addresses, so they are kept as links named after the files. To attach the files themselves, turn on \"Download attached files\" on the Connection step."}
+              </Text>
+            )}
             {target.kind === "allureId" && (
               <Text size="xs" c="dimmed">
                 Only for files exported from this Allure TestOps project: the case with this id is updated. Leave the {xml ? "field" : "column"} unmapped when
