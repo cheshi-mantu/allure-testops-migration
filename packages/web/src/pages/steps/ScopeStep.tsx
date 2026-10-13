@@ -1,6 +1,7 @@
 import { Alert, Card, Code, Loader, MultiSelect, Select, SimpleGrid, Stack, TagsInput, Text, TextInput, Title } from "@mantine/core";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
+import { isFileSource } from "@atm/shared";
 import { api, errorText } from "../../api/client";
 import { useProfile } from "../../components/ProfileContext";
 
@@ -60,7 +61,7 @@ export function ScopeStep() {
 
   return (
     <Stack>
-      <SimpleGrid cols={{ base: 1, lg: profile.source === "csv" ? 1 : 2 }} maw={profile.source === "csv" ? 640 : undefined}>
+      <SimpleGrid cols={{ base: 1, lg: isFileSource(profile.source) ? 1 : 2 }} maw={isFileSource(profile.source) ? 640 : undefined}>
         {profile.source === "xray" && <XrayScopeCard onChange={invalidateDiscovery} />}
         {profile.source === "testrail" && (
         <Card withBorder>

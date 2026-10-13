@@ -74,7 +74,7 @@ export function splitPath(value: string, separator: string): string[] {
     .filter(Boolean);
 }
 
-function levelsOf(paths: string[][]): SectionLevelInfo[] {
+export function levelsOf(paths: string[][]): SectionLevelInfo[] {
   const levels: SectionLevelInfo[] = [];
   const names: Set<string>[] = [];
   for (const path of paths) {
@@ -188,7 +188,7 @@ export async function discoverCsv(profile: Profile, files: FileStore): Promise<S
   };
 }
 
-function columnInfo(column: string, samples: string[], suggestion: Suggestion): SourceFieldInfo {
+export function columnInfo(column: string, samples: string[], suggestion: Suggestion): SourceFieldInfo {
   const separator = suggestion.separator;
   const counts = new Map<string, number>();
   for (const sample of samples) {

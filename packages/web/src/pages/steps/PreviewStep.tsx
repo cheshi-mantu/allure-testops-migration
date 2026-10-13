@@ -2,7 +2,7 @@ import { Alert, Anchor, Autocomplete, Badge, Button, Card, Group, List, Stack, T
 import { IconAlertTriangle, IconPaperclip, IconStack2 } from "@tabler/icons-react";
 import { useMutation } from "@tanstack/react-query";
 import { useEffect, useState, type ReactNode } from "react";
-import type { FieldTargetKind, PlannedAttachment, PlannedCase, PlannedNote, PlannedStep, Profile, TestOpsDiscovery } from "@atm/shared";
+import { isFileSource, type FieldTargetKind, type PlannedAttachment, type PlannedCase, type PlannedNote, type PlannedStep, type Profile, type TestOpsDiscovery } from "@atm/shared";
 import { api, errorText } from "../../api/client";
 import { DiscoveryGate } from "../../components/Discovery";
 import { ErrorAlert, NoteList } from "../../components/Problems";
@@ -141,7 +141,8 @@ function TextBlock({ value }: { value: string }) {
 function Preview() {
   const { profile, source: testrail, testops, flush } = useProfile();
   const samples = testrail.data?.sampleCaseIds ?? [];
-  const csv = profile.source === "csv";
+  // A file source: CSV or XML.
+  const csv = isFileSource(profile.source);
   const xray = profile.source === "xray";
   const labelOf = (s: { id: string; name: string }) => (csv ? `${s.name} [${s.id}]` : xray ? `${s.id}: ${s.name}` : `C${s.id}: ${s.name}`);
   const labels = new Map(samples.map((s) => [labelOf(s), s.id]));
@@ -289,14 +290,16 @@ function Preview() {
                     ))}
                   </Stack>
                 </Row>
-                {!csv && (
+                {(!csv || planned.attachments.length > 0) && (
                 <Row label="Attachments">
                   {planned.attachments.length ? <Attachments list={planned.attachments} /> : <Text c="dimmed">Inline: none</Text>}
+                  {!csv && (
                   <Text size="xs" c="dimmed">
                     {xray
                       ? "Files of Xray steps and other files attached to the Jira issue are migrated too."
                       : "Other files attached to the case in TestRail are migrated too."}
                   </Text>
+                  )}
                 </Row>
                 )}
                 <Row label="Scenario">

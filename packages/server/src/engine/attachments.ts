@@ -105,6 +105,6 @@ export class AttachmentSource {
   }
 }
 
-function isHtmlPage(result: { data: Buffer; contentType: string | null }): boolean {
+export function isHtmlPage(result: { data: Buffer; contentType: string | null }): boolean {
   return (result.contentType ?? "").includes("text/html") && result.data.subarray(0, 200).toString("utf8").toLowerCase().includes("<html");
 }

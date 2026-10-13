@@ -1,6 +1,6 @@
 import { Alert, Card, NumberInput, Radio, Select, SimpleGrid, Stack, Switch, Text, TextInput, Title } from "@mantine/core";
 import { useEffect } from "react";
-import type { MigrationOptions } from "@atm/shared";
+import { isFileSource, type MigrationOptions } from "@atm/shared";
 import { useProfile } from "../../components/ProfileContext";
 
 export function OptionsStep() {
@@ -15,7 +15,9 @@ export function OptionsStep() {
   }, [profile.source, projectChosen, testops]);
   const integrations = testops.data?.integrations ?? [];
   const chosenIntegration = options.testKeyIntegrationId;
-  const csv = profile.source === "csv";
+  // A file source: CSV or XML.
+  const csv = isFileSource(profile.source);
+  const xml = profile.source === "xml";
   const xray = profile.source === "xray";
   const testrail = profile.source === "testrail";
   const prefixMissing = options.migrationTagPrefix.trim() === "";
@@ -37,14 +39,14 @@ export function OptionsStep() {
                   ? `Every case gets the tag "${prefixShown}:<issue key>", e.g. "${prefixShown}:CALC-12". Reruns find cases by this tag and update them.`
                   : `Every case gets the tag "${prefixShown}:<TestRail id>". Reruns find cases by this tag and update them. Keep "testrail" to continue a migration made with the previous migration tool.`
             }
-            placeholder={csv ? "e.g. csv-regression" : xray ? "xray" : "testrail"}
+            placeholder={xml ? "e.g. xml-regression" : csv ? "e.g. csv-regression" : xray ? "xray" : "testrail"}
             value={options.migrationTagPrefix}
             error={prefixMissing ? "Enter a prefix. Without it migrated cases cannot be found again, so the migration cannot start." : undefined}
             onChange={(e) => set("migrationTagPrefix", e.currentTarget.value.trim())}
           />
           <TextInput
             label="Additional tag"
-            description={`Optional tag added to every migrated case, e.g. “from-${xray ? "xray" : csv ? "csv" : "testrail"}”.`}
+            description={`Optional tag added to every migrated case, e.g. “from-${xray ? "xray" : xml ? "xml" : csv ? "csv" : "testrail"}”.`}
             value={options.additionalTag}
             onChange={(e) => set("additionalTag", e.currentTarget.value)}
           />
@@ -89,7 +91,7 @@ export function OptionsStep() {
           {!xray && (
           <Radio.Group
             label={csv ? "Text format" : "TestRail text format"}
-            description={csv ? "Text cells may hold Markdown or HTML." : "Newer TestRail versions store HTML; older ones use Markdown."}
+            description={xml ? "Text in the file may be Markdown or HTML." : csv ? "Text cells may hold Markdown or HTML." : "Newer TestRail versions store HTML; older ones use Markdown."}
             value={options.textFormat}
             onChange={(value) => set("textFormat", value as MigrationOptions["textFormat"])}
           >

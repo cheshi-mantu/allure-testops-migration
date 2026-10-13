@@ -21,4 +21,11 @@ describe("suggestTarget", () => {
   it("keeps the suggestion for a field with values", () => {
     expect(suggestTarget(field(3))).toEqual({ kind: "customField", name: "Test set" });
   });
+
+  it("knows TestRail fields by their old and their TestRail 9 names", () => {
+    const text = (systemName: string): SourceFieldInfo => ({ systemName, label: "Preconditions", kind: "text", system: false, options: null, filledCount: 2, examples: [] });
+    expect(suggestTarget(text("custom_preconds"))).toEqual({ kind: "precondition", heading: "" });
+    expect(suggestTarget(text("custom_case_preconds"))).toEqual({ kind: "precondition", heading: "" });
+    expect(suggestTarget({ ...text("custom_case_steps_separated"), kind: "steps" })).toEqual({ kind: "scenario" });
+  });
 });

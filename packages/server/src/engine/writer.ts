@@ -124,7 +124,7 @@ export class TestOpsWriter {
       upload: (name, data, type) => this.testops.uploadTestCaseAttachment(testCase.id, name, data, type),
     };
     const uploaded = await this.uploadAll(this.collectAttachments(planned), source, uploader, log);
-    if (this.profile.options.migrateAttachments) {
+    if (this.downloadsFiles) {
       // Attachments of the case that are not referenced inline.
       for (const attachment of await source.caseAttachments()) {
         await this.upload({ sourceId: String(attachment.id), fileName: "" }, source, uploader, uploaded, log);
@@ -135,7 +135,7 @@ export class TestOpsWriter {
       const attachment = uploaded.get(sourceId);
       return attachment ? `/api/rs/testcase/attachment/${attachment.id}/content` : null;
     };
-    const text = async (value: string) => resolveAttachmentImages(await this.resolveLinks(value, linkedCaseIds), imageUrl);
+    const text = async (value: string) => resolveAttachmentImages(await this.resolveLinks(value, linkedCaseIds), imageUrl, (id) => this.assets.missingImage?.(id) ?? null);
 
     const patch: ToTestCasePatch = {
       name: planned.name,
@@ -308,6 +308,10 @@ export class TestOpsWriter {
     await this.testops.setCustomFieldValues(testCaseId, values);
   }
 
+  private get downloadsFiles(): boolean {
+    return this.assets.downloadsFiles ?? this.profile.options.migrateAttachments;
+  }
+
   private collectAttachments(planned: PlannedCase): PlannedAttachment[] {
     return [...planned.attachments, ...stepAttachments(planned.scenario)];
   }
@@ -334,7 +338,7 @@ export class TestOpsWriter {
     if (uploaded.has(key)) {
       return;
     }
-    if (attachment.sourceId !== null && !this.profile.options.migrateAttachments) {
+    if (attachment.sourceId !== null && !this.downloadsFiles) {
       return;
     }
     try {

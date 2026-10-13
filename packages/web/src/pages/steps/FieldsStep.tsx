@@ -43,6 +43,7 @@ const TARGET_LABELS: Record<FieldTargetKind, string> = {
   status: "Status",
   owner: "Owner",
   link: "Links",
+  attachment: "Attachments (files by their address)",
   issue: "Issues",
   description: "Description",
   precondition: "Precondition",
@@ -183,12 +184,23 @@ function FieldsEditor() {
     }
     return filter === "all" || (filter === "skipped") === (mapping.target.kind === "ignore");
   });
-  const csv = profile.source === "csv";
+  const xml = profile.source === "xml";
+  // A file source: CSV columns or XML fields.
+  const csv = profile.source === "csv" || xml;
+  const unit = xml ? "field" : "column";
   const nameColumns = profile.fields.filter((m) => m.target.kind === "name").map((m) => m.source);
   const xray = profile.source === "xray";
   const longText = (f: TestRailFieldInfo) => ["text", "steps", "url"].includes(f.kind);
   const groups: { title: string; hint: string; fields: TestRailFieldInfo[] }[] = csv
-    ? [{ title: "Columns", hint: "In file order. Values with a short list of options can be renamed or skipped one by one.", fields: visible }]
+    ? [
+        {
+          title: xml ? "Fields" : "Columns",
+          hint: xml
+            ? "In file order. A slash in a name means an element inside another one, e.g. custom/preconds. Values with a short list of options can be renamed or skipped one by one."
+            : "In file order. Values with a short list of options can be renamed or skipped one by one.",
+          fields: visible,
+        },
+      ]
     : xray
       ? [
           {
@@ -241,7 +253,7 @@ function FieldsEditor() {
       <Group justify="space-between">
         <Text c="dimmed" maw={720}>
           {csv
-            ? `Choose where each column goes. Examples and counts come from all ${discovery.sampledCases} case(s) of the file.`
+            ? `Choose where each ${unit} goes. Examples and counts come from all ${discovery.sampledCases} case(s) of the file.`
             : xray
               ? `Choose where each attribute of the Xray tests goes: Xray details and every Jira field used by the tests. Examples and counts come from ${discovery.sampledCases} sampled test(s).`
               : `Choose where each TestRail field goes. Examples and counts come from ${discovery.sampledCases} sampled case(s) of the selected suites.`}
@@ -251,13 +263,13 @@ function FieldsEditor() {
       {csv && nameColumns.length !== 1 && (
         <Alert color="red">
           {nameColumns.length === 0
-            ? "Map one column to the test case name. The name is the only required value: nothing is imported without it, and records with an empty name are skipped."
-            : `Only one column can be the test case name; now: ${nameColumns.join(", ")}.`}
+            ? `Map one ${unit} to the test case name. The name is the only required value: nothing is imported without it, and records with an empty name are skipped.`
+            : `Only one ${unit} can be the test case name; now: ${nameColumns.join(", ")}.`}
         </Alert>
       )}
       {csv && !profile.fields.some((m) => m.target.kind === "sourceId") && (
         <Alert color="yellow">
-          No column is the case id. Reruns then recognise cases by name, so a case renamed in the file becomes a new case. Map a column with
+          No {unit} is the case id. Reruns then recognise cases by name, so a case renamed in the file becomes a new case. Map a {unit} with
           stable ids to "Case id" if the file has one.
         </Alert>
       )}
@@ -311,6 +323,7 @@ function FieldRow({
   onChange: (change: (mapping: FieldMapping) => void) => void;
 }) {
   const { profile, testops } = useProfile();
+  const xml = profile.source === "xml";
   const [open, setOpen] = useState(false);
   const target = mapping.target;
   const showValues = field.options !== null && VALUE_TARGETS.includes(target.kind);
@@ -337,7 +350,7 @@ function FieldRow({
           <Group gap={6}>
             <Text fw={600}>{field.label}</Text>
             <Badge size="xs" variant="light" color="gray">
-              {KIND_LABELS[field.kind]}
+              {xml && field.kind === "column" ? "field" : KIND_LABELS[field.kind]}
             </Badge>
             {field.kind === "column" && profile.csv.pathColumn === field.systemName && (
               <Tooltip label="Its levels are mapped on the Sections step">
@@ -346,7 +359,7 @@ function FieldRow({
                 </Badge>
               </Tooltip>
             )}
-            {!field.system && field.kind !== "column" && (
+            {!field.system && field.kind !== "column" && !xml && (
               <Tooltip label={profile.source === "xray" ? "Custom field in Jira" : "Custom field in TestRail"}>
                 <Badge size="xs" variant="dot" color="gray">
                   custom
@@ -358,7 +371,11 @@ function FieldRow({
             {field.systemName}
           </Text>
           <Text size="xs" c={field.filledCount ? "dimmed" : "orange"} mt={4}>
-            {field.kind === "column"
+            {xml
+              ? field.filledCount
+                ? `Filled in ${field.filledCount} of ${sampled} case(s)`
+                : "Empty in every case"
+              : field.kind === "column"
               ? field.filledCount
                 ? `Filled in ${field.filledCount} row(s)`
                 : "Empty in every row"
@@ -386,7 +403,10 @@ function FieldRow({
             <Select
               aria-label={`Target for ${field.label}`}
               searchable
-              data={allowedTargets(field).map((kind) => ({ value: kind, label: TARGET_LABELS[kind] }))}
+              data={allowedTargets(field)
+                // Steps of an XML file carry their expected results themselves.
+                .filter((kind) => (xml ? kind !== "scenarioExpected" : kind !== "attachment"))
+                .map((kind) => ({ value: kind, label: TARGET_LABELS[kind] }))}
               value={target.kind}
               allowDeselect={false}
               onChange={(kind) =>
@@ -437,9 +457,16 @@ function FieldRow({
               />
             )}
             {target.kind === "scenario" && field.kind === "column" && <StepFormatSettings />}
+            {target.kind === "attachment" && (
+              <Text size="xs" c="dimmed">
+                {profile.xml.files.download
+                  ? `The files at these addresses are downloaded from ${profile.xml.files.endpoint.trim() || "the source system (set its address on the Connection step)"} and attached to the case. Addresses on other hosts stay links.`
+                  : "The file holds only addresses, so they are kept as links named after the files. To attach the files themselves, turn on \"Download attached files\" on the Connection step."}
+              </Text>
+            )}
             {target.kind === "allureId" && (
               <Text size="xs" c="dimmed">
-                Only for files exported from this Allure TestOps project: the case with this id is updated. Leave the column unmapped when
+                Only for files exported from this Allure TestOps project: the case with this id is updated. Leave the {xml ? "field" : "column"} unmapped when
                 importing into another project.
               </Text>
             )}
@@ -486,18 +513,19 @@ function FieldRow({
 
 function StepFormatSettings() {
   const { profile, update, source } = useProfile();
-  const steps = profile.csv.steps;
-  const detected = source.data?.csv?.stepFormat;
+  const xml = profile.source === "xml";
+  const steps = xml ? profile.xml.steps : profile.csv.steps;
+  const detected = xml ? null : source.data?.csv?.stepFormat;
   const set = (change: (s: typeof steps) => void) =>
     update((p) => {
-      change(p.csv.steps);
+      change(p.source === "xml" ? p.xml.steps : p.csv.steps);
     });
   return (
     <Stack gap="xs">
       <Select
         label="Steps are written as"
         allowDeselect={false}
-        data={STEP_FORMATS}
+        data={xml ? STEP_FORMATS.map((f) => (f.value === "single" ? { ...f, label: "The whole text is one step" } : f)) : STEP_FORMATS}
         value={steps.format}
         description={
           steps.format === "auto" && detected
@@ -593,7 +621,7 @@ function ValueTable({
     <Table mt="sm" verticalSpacing={4}>
       <Table.Thead>
         <Table.Tr>
-          <Table.Th>{profile.source === "csv" ? "CSV value" : profile.source === "xray" ? "Jira or Xray value" : "TestRail value"}</Table.Th>
+          <Table.Th>{profile.source === "csv" ? "CSV value" : profile.source === "xml" ? "Value in the file" : profile.source === "xray" ? "Jira or Xray value" : "TestRail value"}</Table.Th>
           <Table.Th w={90}>In sample</Table.Th>
           <Table.Th w="45%">Allure TestOps value</Table.Th>
           <Table.Th w={90}>Skip</Table.Th>

@@ -23,6 +23,7 @@ import {
   IconDots,
   IconDownload,
   IconEye,
+  IconFileCode,
   IconFileSpreadsheet,
   IconHierarchy2,
   IconListDetails,
@@ -138,6 +139,35 @@ const CSV_STEPS: StepDef[] = [
   },
 ];
 
+const XML_STEPS: StepDef[] = [
+  { ...CSV_STEPS[0]!, description: "Allure TestOps access, attached files" },
+  {
+    key: "file",
+    label: "XML file",
+    description: "Upload or reuse, test case element",
+    icon: <IconFileCode size={16} />,
+    done: (p) => Boolean(p.xml.fileId),
+    render: () => <FileStep />,
+  },
+  CSV_STEPS[2]!,
+  {
+    key: "structure",
+    label: "Sections",
+    description: "Nesting levels → custom fields",
+    icon: <IconHierarchy2 size={16} />,
+    done: (p) => p.structure.levels.some(Boolean),
+    render: () => <StructureStep />,
+  },
+  {
+    key: "fields",
+    label: "Fields",
+    description: "Fields of the file → Allure TestOps",
+    icon: <IconListDetails size={16} />,
+    done: (p) => p.fields.some((m) => m.target.kind === "name"),
+    render: () => <FieldsStep />,
+  },
+];
+
 const xrayConnected = (p: Profile) => {
   const c = p.xray.connection;
   return Boolean(c.clientId && hasSecret(c.clientSecret) && c.jiraUrl && c.jiraEmail && hasSecret(c.jiraApiToken));
@@ -207,7 +237,7 @@ const COMMON_STEPS: StepDef[] = [
 ];
 
 function stepsFor(profile: Profile): StepDef[] {
-  const sourceSteps = profile.source === "csv" ? CSV_STEPS : profile.source === "xray" ? XRAY_STEPS : TESTRAIL_STEPS;
+  const sourceSteps = profile.source === "csv" ? CSV_STEPS : profile.source === "xml" ? XML_STEPS : profile.source === "xray" ? XRAY_STEPS : TESTRAIL_STEPS;
   return [...sourceSteps, ...COMMON_STEPS];
 }
 

@@ -10,14 +10,28 @@ export function newProfile(id: string, name: string, now = new Date(), source: S
     updatedAt: now.toISOString(),
     ...(source === "csv"
       ? { options: { migrationTagPrefix: "csv", selfLink: false }, structure: { treeName: "CSV sections" } }
-      : source === "xray"
-        ? { options: { migrationTagPrefix: "xray" }, structure: { treeName: "Xray folders" } }
-        : {}),
+      : source === "xml"
+        ? { options: { migrationTagPrefix: "xml", selfLink: false }, structure: { treeName: "XML sections" } }
+        : source === "xray"
+          ? { options: { migrationTagPrefix: "xray" }, structure: { treeName: "Xray folders" } }
+          : {}),
   });
 }
 
-/** Field targets that make sense for a TestRail field, most natural first. */
+/**
+ * TestRail 9.0 and later name case fields `custom_case_<name>`, older ones `custom_<name>`:
+ * the name the defaults below are written for.
+ */
+function classicName(systemName: string): string {
+  return systemName.replace(/^custom_case_/, "custom_");
+}
+
+/** Field targets that make sense for a source field: "Do not migrate" first, then the most natural ones. */
 export function allowedTargets(field: TestRailFieldInfo): FieldTarget["kind"][] {
+  return ["ignore", ...targetsOf(field).filter((kind) => kind !== "ignore")];
+}
+
+function targetsOf(field: TestRailFieldInfo): FieldTarget["kind"][] {
   switch (field.kind) {
     case "column":
       return [
@@ -35,6 +49,7 @@ export function allowedTargets(field: TestRailFieldInfo): FieldTarget["kind"][] 
         "owner",
         "role",
         "link",
+        "attachment",
         "issue",
         "comment",
         "allureId",
@@ -46,7 +61,7 @@ export function allowedTargets(field: TestRailFieldInfo): FieldTarget["kind"][] 
       if (field.systemName === "xray:preconditions") {
         return ["precondition", "description", "comment", "customField", "tag", "ignore"];
       }
-      if (field.systemName === "custom_steps" || field.systemName === "xray:definition") {
+      if (classicName(field.systemName) === "custom_steps" || field.systemName === "xray:definition") {
         return ["scenario", "description", "precondition", "expectedResult", "comment", "ignore"];
       }
       return ["description", "precondition", "expectedResult", "comment", "customField", "tag", "ignore"];
@@ -85,7 +100,7 @@ export function suggestTarget(field: TestRailFieldInfo, testops?: TestOpsDiscove
     }
     return target;
   }
-  const preset = TEXT_DEFAULTS[field.systemName];
+  const preset = TEXT_DEFAULTS[classicName(field.systemName)];
   if (preset) {
     return preset;
   }
@@ -125,7 +140,7 @@ export function suggestMapping(field: TestRailFieldInfo, testops?: TestOpsDiscov
   return {
     source: field.systemName,
     target: suggestTarget(field, testops),
-    values: field.kind === "checkbox" ? { "1": "Yes", "0": null } : {},
+    values: field.suggestedValues ?? (field.kind === "checkbox" ? { "1": "Yes", "0": null } : {}),
     separator: field.suggestedSeparator ?? (field.systemName === "refs" ? "," : ""),
   };
 }
