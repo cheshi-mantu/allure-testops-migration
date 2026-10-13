@@ -54,6 +54,7 @@ packages/
   server/src/testrail/      TestRail client, discovery, field and section handling
   server/src/xray/          Xray Cloud (GraphQL) and Jira Cloud (REST v3) clients, field catalog, wiki markup, transform, discovery
   server/src/csv/           CSV reading, column suggestions, grouping rows into cases, step parsing, transform
+  server/src/xml/           generic XML reading (read.ts) and the XML source on top of the CSV table model (source.ts)
   server/src/convert/       TestRail case to PlannedCase (pure), text and markup conversion
   server/src/engine/        sources, runner (dry run and migration), writer, target lookups, problems
   web/src/pages/steps/      one React component per wizard step
@@ -193,6 +194,16 @@ Step bodies are plain text; `description`, `precondition`, `expectedResult` and 
 - A problems list grouped by cause, with counts, affected records and a fix button; a downloadable plain text log.
 - Required settings block the next step and the run with a message in red, instead of silent defaults.
 - Runs remember the source, project and tag prefix they used; runs made with other settings are shown as such.
+
+### File sources: CSV and XML
+
+A file source has no connection and no scope: the profile points to a file of the library (`storage/fileStore.ts`), `isFileSource()` tells the two apart from API sources, and the wizard shows a file step instead.
+
+The XML source is generic on purpose: there are no presets per tool. `xml/read.ts` parses the file twice with a stream parser, first to learn the structure (what repeats, what is a list, which element looks like a test case), then to flatten every case into `XmlRecord { line, values, steps, path }`. `xml/source.ts` lays those records out as a table (one row per value of a field) and reuses the CSV code for suggestions, value tables and the transform; only the step list and the section path come from the XML structure. Rules worth keeping:
+
+- Never key behaviour on a tool name. A new export should work because of its shape. What is specific to one export goes into small dictionaries: element names for step parts (`ACTION`, `EXPECTED`, `DATA` in `read.ts`) and numeric codes with their meaning (`KNOWN_CODES` in `source.ts`), which only pre-fill the value mapping the user can change.
+- The detected test case element is a suggestion: `XmlFilePreview.candidates` lists the alternatives and `profile.xml.caseElement` overrides the guess.
+- Add a sanitized sample of every new export to `packages/server/test/fixtures` (addresses on `example.com`) and cover it in `xml/read.test.ts` and `test/xml.e2e.test.ts`.
 
 ## Testing
 

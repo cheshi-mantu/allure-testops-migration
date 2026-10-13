@@ -20,7 +20,7 @@ import { notifications } from "@mantine/notifications";
 import { IconDownload, IconPlayerPlay, IconPlayerStop, IconTestPipe, IconTrash } from "@tabler/icons-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { runContextChanges, SECRET_MASK, type Profile, type RunLogEntry, type RunSummary } from "@atm/shared";
+import { isFileSource, runContextChanges, SECRET_MASK, type Profile, type RunLogEntry, type RunSummary } from "@atm/shared";
 import { api, errorText } from "../../api/client";
 import { useProfile } from "../../components/ProfileContext";
 import { FixButton, ProblemList } from "../../components/Problems";
@@ -35,7 +35,7 @@ function otherSettings(run: RunSummary, profile: Profile, currentFileName: strin
   return runContextChanges(context, profile).map((change) => {
     switch (change) {
       case "source":
-        if (profile.source === "csv") {
+        if (isFileSource(profile.source)) {
           return `File "${context.sourceLabel}", the profile now uses ${currentFileName ? `"${currentFileName}"` : "another file"}.`;
         }
         if (profile.source === "xray") {
@@ -73,6 +73,19 @@ function problems(profile: Profile): string[] {
     }
     return list;
   }
+  if (profile.source === "xml") {
+    if (!profile.xml.fileId) {
+      list.push("Choose an XML file (XML file).");
+    }
+    if (!profile.testops.scope.projectId) {
+      list.push("Choose the Allure TestOps project (Project).");
+    }
+    const names = profile.fields.filter((m) => m.target.kind === "name").length;
+    if (names !== 1) {
+      list.push("Map exactly one field to the test case name (Fields).");
+    }
+    return list;
+  }
   if (profile.source === "xray") {
     const c = profile.xray.connection;
     if (!c.jiraUrl || !c.jiraEmail || !has(c.jiraApiToken) || !c.clientId || !has(c.clientSecret)) {
@@ -98,12 +111,14 @@ function problems(profile: Profile): string[] {
   return list;
 }
 
-function warnings(profile: Profile): string[] {
+function warnings(profile: Profile, sourceDepth: number | null): string[] {
   const list: string[] = [];
   if (profile.source === "csv" && !profile.csv.pathColumn) {
     if (!profile.csv.withoutPath) {
       list.push("No section path column is chosen, so cases will not be grouped into sections.");
     }
+  } else if (profile.source === "xml" && sourceDepth === 0) {
+    // The cases of the file are not inside named elements: there is no structure to keep.
   } else if (!profile.structure.levels.some(Boolean) && !profile.structure.suiteField) {
     list.push(
       profile.source === "xray"
@@ -112,7 +127,7 @@ function warnings(profile: Profile): string[] {
     );
   }
   if (profile.fields.some((m) => m.target.kind === "role" && !m.target.role)) {
-    list.push("A column maps to members without a role; those members will be skipped.");
+    list.push(`A ${profile.source === "csv" ? "column" : "field"} maps to members without a role; those members will be skipped.`);
   }
   if (profile.fields.some((m) => m.target.kind === "issue" && m.target.integrationId === null)) {
     list.push("A field maps to issues without an issue tracker integration; those issues will be skipped.");
@@ -163,11 +178,12 @@ function useRunStream(profileId: string, run: RunSummary | null) {
 }
 
 export function RunStep() {
-  const { profile, flush } = useProfile();
+  const { profile, flush, source } = useProfile();
   const queryClient = useQueryClient();
   const runs = useQuery({ queryKey: ["runs", profile.id], queryFn: () => api.runs(profile.id), refetchInterval: 10_000 });
-  const files = useQuery({ queryKey: ["files"], queryFn: api.files, enabled: profile.source === "csv" });
-  const currentFileName = files.data?.find((f) => f.id === profile.csv.fileId)?.name ?? null;
+  const files = useQuery({ queryKey: ["files"], queryFn: api.files, enabled: isFileSource(profile.source) });
+  const fileId = profile.source === "xml" ? profile.xml.fileId : profile.csv.fileId;
+  const currentFileName = files.data?.find((f) => f.id === fileId)?.name ?? null;
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [confirm, setConfirm] = useState(false);
   const [confirmClear, setConfirmClear] = useState(false);
@@ -177,7 +193,7 @@ export function RunStep() {
   // A run made with another file, project or tag prefix says nothing about the current settings: show it only on request.
   const selected = runs.data?.find((r) => r.id === selectedId) ?? active ?? (latestOther.length === 0 ? latest : null);
   const blockers = problems(profile);
-  const hints = warnings(profile);
+  const hints = warnings(profile, source.data?.maxDepth ?? null);
 
   const start = useMutation({
     mutationFn: async (dryRun: boolean) => {
@@ -368,7 +384,7 @@ export function RunStep() {
       <Modal opened={confirm} onClose={() => setConfirm(false)} title="Start the migration?">
         <Stack>
           <Text size="sm">
-            Test cases and custom fields{profile.source === "csv" ? "" : ", shared steps and attachments"} will be created or updated in
+            Test cases and custom fields{isFileSource(profile.source) ? "" : ", shared steps and attachments"} will be created or updated in
             Allure TestOps project #{profile.testops.scope.projectId}.{" "}
             {profile.source === "testrail" ? "TestRail is only read." : profile.source === "xray" ? "Jira and Xray are only read." : "The file is not changed."}
           </Text>
@@ -463,7 +479,7 @@ function RunDetails({ profile, run, other }: { profile: Profile; run: RunSummary
           </Badge>
           {counters.skipped > 0 && (
             <Badge variant="light" color="orange">
-              {counters.skipped} {profile.source === "csv" ? "cannot be imported" : "skipped"}
+              {counters.skipped} {isFileSource(profile.source) ? "cannot be imported" : "skipped"}
             </Badge>
           )}
         </Group>

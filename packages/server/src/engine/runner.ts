@@ -204,14 +204,17 @@ export class Run {
 
   private async work() {
     const profile = this.profile;
-    if (profile.source === "csv" && profile.csv.fileId) {
-      const file = (await this.deps.files.list().catch(() => [])).find((f) => f.id === profile.csv.fileId);
+    const fileId = profile.source === "csv" ? profile.csv.fileId : profile.source === "xml" ? profile.xml.fileId : null;
+    if (fileId) {
+      const file = (await this.deps.files.list().catch(() => [])).find((f) => f.id === fileId);
       if (file) {
         this.summary.context!.sourceLabel = file.name;
       }
     }
     const log = (level: "info" | "warn", message: string, caseId?: string) => this.log(level, message, caseId);
-    this.phase(profile.source === "csv" ? "Reading the CSV file" : profile.source === "xray" ? "Connecting to Jira and Xray" : "Connecting to TestRail");
+    this.phase(
+      profile.source === "csv" ? "Reading the CSV file" : profile.source === "xml" ? "Reading the XML file" : profile.source === "xray" ? "Connecting to Jira and Xray" : "Connecting to TestRail",
+    );
     if (profile.source === "testrail") {
       const perMinute = testRailRequestsPerMinute(profile.testrail.connection);
       if (perMinute === null) {
@@ -585,7 +588,7 @@ export class Run {
         code: "tree-not-created",
         level: "warn",
         title: `The tree "${structure.treeName}" was not created: ${explanation.title}`,
-        hint: `${explanation.hint} The cases are migrated anyway; you can create the tree in the project settings of Allure TestOps (Trees) from the fields ${fields.map((field) => `"${field.name}"`).join(", ")}, or turn tree creation off on the ${this.profile.source === "csv" ? "Sections" : "Suites & sections"} step.`,
+        hint: `${explanation.hint} The cases are migrated anyway; you can create the tree in the project settings of Allure TestOps (Trees) from the fields ${fields.map((field) => `"${field.name}"`).join(", ")}, or turn tree creation off on the ${this.profile.source === "csv" || this.profile.source === "xml" ? "Sections" : this.profile.source === "xray" ? "Folders" : "Suites & sections"} step.`,
         fix: { step: "structure" },
       });
     }
@@ -600,6 +603,8 @@ function sourceLabelOf(profile: Profile): string {
   switch (profile.source) {
     case "csv":
       return "CSV file";
+    case "xml":
+      return "XML file";
     case "xray": {
       const jql = profile.xray.scope.jql.trim();
       return `Xray project ${profile.xray.scope.projectKey || "?"}${jql ? ` (${jql})` : ""}`;

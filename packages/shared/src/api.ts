@@ -62,6 +62,8 @@ export interface SourceFieldInfo {
   suggestedTarget?: import("./profile.js").FieldTarget;
   /** Separator the values seem to use, e.g. a comma in "smoke, ui". */
   suggestedSeparator?: string;
+  /** Translation of values the source stores as codes, e.g. `1` for "Manual". */
+  suggestedValues?: Record<string, string>;
 }
 
 export interface SectionLevelInfo {
@@ -84,7 +86,7 @@ export interface SuiteStructure {
 
 /** What the mapping screens show about the source: structure, fields and sample cases. */
 export interface SourceDiscovery {
-  source: "testrail" | "csv" | "xray";
+  source: "testrail" | "csv" | "xray" | "xml";
   project: NamedId & { suiteMode: number };
   suites: NamedId[];
   structure: SuiteStructure[];
@@ -126,6 +128,23 @@ export interface StoredFileInfo {
   uploadedAt: string;
   /** Profiles that use the file. */
   usedBy: { id: string; name: string }[];
+}
+
+/** What an XML file holds, as the current settings read it. */
+export interface XmlFilePreview {
+  /** Element that holds one test case, chosen or detected. */
+  caseElement: string | null;
+  /** Elements that could hold a test case, most likely first. */
+  candidates: { name: string; count: number }[];
+  caseCount: number;
+  /** Lists of step elements found inside the cases, e.g. `custom/steps_separated`. */
+  stepLists: { field: string; action: string | null; expected: string | null; data: string | null; cases: number }[];
+  /** Deepest nesting of named elements around the cases (suites, sections, folders). */
+  depth: number;
+  fieldCount: number;
+  /** First cases, to check the reading at a glance. */
+  sample: { line: number; id: string; name: string; path: string[]; steps: number }[];
+  warnings: string[];
 }
 
 /** First rows of a CSV file as the current settings read it. */
@@ -323,8 +342,8 @@ export interface RunLogEntry {
 export interface ProfileListItem {
   id: string;
   name: string;
-  source: "testrail" | "csv" | "xray";
-  /** CSV: name of the chosen file. */
+  source: "testrail" | "csv" | "xray" | "xml";
+  /** CSV and XML: name of the chosen file. */
   fileName: string | null;
   updatedAt: string;
   testrailEndpoint: string;

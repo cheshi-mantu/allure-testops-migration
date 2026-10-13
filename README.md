@@ -1,6 +1,6 @@
 # Allure TestOps Migration
 
-A web tool that moves test cases into [Allure TestOps](https://qameta.io/) from **TestRail**, **Xray Cloud** or any **CSV file**.
+A web tool that moves test cases into [Allure TestOps](https://qameta.io/) from **TestRail**, **Xray Cloud**, any **CSV file** or an **XML export** of another test management tool.
 
 Everything is configured in the browser: connect the systems, map the source structure and fields to Allure TestOps using live data from both sides, preview a converted case, do a dry run, then migrate. Running the migration again updates the migrated cases instead of duplicating them.
 
@@ -24,6 +24,7 @@ Profiles and run logs are stored in the `migration-data` Docker volume. Use **Ex
 - **TestRail**: the URL, a user email and an API key (*My Settings → API Keys*). The API must be enabled in *Administration → Site Settings → API*. Read access to the project is enough.
 - **Xray Cloud**: the Jira Cloud site, the email and an API token of an Atlassian account that can browse the project (*id.atlassian.com → Security → API tokens*), and an Xray API key: client id and client secret (*Jira → Apps → Xray → API Keys*).
 - **CSV**: the file. Exports from spreadsheets, other test management tools and Allure TestOps itself work.
+- **XML**: the file. An export with one element per test case, for example from TestRail or TestLink.
 - **Allure TestOps**: the URL and an API token (*Your profile → API tokens*) of an account that can edit test cases in the target project. Listing users for owner mapping needs administrator rights; without them owners can still be typed in.
 
 ## The steps
@@ -104,6 +105,21 @@ Create a profile with *CSV file* as the source. The steps are Connection (Allure
 
 CSV files carry text only: attachments and shared steps are not part of this source.
 
+## XML files
+
+Create a profile with *XML file* as the source. The steps are Connection (Allure TestOps only), XML file, Project, Sections, Fields, Options, Preview and Run.
+
+There is one XML source for every tool. The file is read by its structure, not by the name of the tool that made it, so exports of TestRail (*Test Cases → Export → XML*), TestLink and other test management tools work the same way:
+
+- **Test cases.** The element that repeats and has a title or name is a test case; `case`, `testcase`, `test` and similar names are preferred. The XML file step shows the detected element, the number of cases and the first cases as they are read. When the guess is wrong, choose another element from the list.
+- **Fields.** Child elements and attributes of a case become fields, named by their path inside the case, for example `custom/preconds` or `@name`. A value wrapped with its id (`<priority><id>3</id><value>High</value></priority>`) reads as the value. A list of values (`<platforms><item>…</item><item>…</item></platforms>`) is one field with several values. A list of name and value pairs, the usual form of custom fields, gives one field per name. A list of records, such as attachments, gives a field per child (`attachments/name`, `attachments/url`).
+- **Steps.** A list of step elements inside a case becomes the scenario. The parts of a step are recognised by their names: action (`content`, `actions`, `step`…), expected result (`expected`, `expectedresults`…) and data (`additional_info`, `data`…). Steps without an expected result are kept. Steps written as text in one field, including BDD scenarios, can be mapped to the scenario too, with the same step formats as in CSV files. A case takes its scenario from the first of these fields that is filled.
+- **Sections.** The named elements around a case (suites, sections, folders, at any depth) are its section path. Its levels are mapped to custom fields on the Sections step exactly like TestRail sections, including the tree.
+- **Mapping.** Every field gets a suggested target from its name and content, the same way as CSV columns, and fields with a short list of values show all values with counts for renaming or skipping. Technical values (internal ids, order numbers) are set to *Do not migrate*. Numeric codes of known exports are translated as a first suggestion, for example TestLink importance `3` to `High`.
+- **Reruns.** Cases are tagged `<prefix>:<case id>` with the id as it is written in the file, for example `xml-regression:C1697`, or a hash of the name when the file has no id.
+
+XML files carry text only. Links to attached files are kept as links named after the file; images inside text become links to their address when the file lists it. The files themselves and shared steps are not part of this source: to keep them, migrate from the tool directly when the tool has its own source here.
+
 ## TestRail API rate limit
 
 TestRail Cloud allows 180 API requests per minute per instance on Professional and 300 on Enterprise; TestRail Server has no limit ([TestRail docs](https://support.testrail.com/hc/en-us/articles/7077083596436-Introduction-to-the-TestRail-API)). The tool paces its requests to stay within the limit chosen on the Connections step: Professional (default), Enterprise, a custom number, or off for TestRail Server. The limit covers everything the tool sends to that TestRail instance at once (discovery, previews and runs of all profiles). Because the limit is shared with every other API user of the instance, such as CI jobs posting results, a custom value below the plan limit leaves them room. If TestRail still answers 429, the tool waits for the time given in `Retry-After` before sending anything else.
@@ -154,12 +170,22 @@ npx tsx dev/xray-seed.ts --project KEY --bulk 300
 npx tsx dev/xray-seed.ts --project KEY --cleanup --yes
 ```
 
+### Test data in a real TestRail
+
+`dev/testrail-seed.ts` fills one TestRail project with the same scenarios, for trying both the API migration and the migration of an XML export: several suites, nested sections with descriptions, milestones, shared steps, custom fields of every type (bound to that project only), cases on the Steps, Text, Exploratory and BDD templates, Markdown and HTML text, tables, inline images, attachments, references and estimates. It needs a TestRail administrator. `--dry` prints what would be created without touching TestRail; An existing project with that name is reused, also one that allows a single suite only: the suites then become top sections. `--cleanup --yes` deletes only the suites and top sections the script made, with their cases, and keeps the project, its other content and the fields, because TestRail has no API to delete custom fields (remove the "ATM ..." fields in Administration, Customizations).
+
+```bash
+export TESTRAIL_URL=https://yourcompany.testrail.io TESTRAIL_EMAIL=you@example.com TESTRAIL_API_KEY=...
+npx tsx dev/testrail-seed.ts --dry --bulk 300
+npx tsx dev/testrail-seed.ts --bulk 300
+```
+
 ### Layout
 
 ```
 packages/
   shared/   profile schema (zod), API types, default mappings, section level mapping
-  server/   Fastify API, TestRail, Jira, Xray and Allure TestOps clients, CSV reading, conversion, migration engine
+  server/   Fastify API, TestRail, Jira, Xray and Allure TestOps clients, CSV and XML reading, conversion, migration engine
   web/      React + Mantine UI
   mocks/    fake TestRail, Jira with Xray Cloud, and Allure TestOps servers with synthetic projects
 ```

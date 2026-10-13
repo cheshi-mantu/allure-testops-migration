@@ -136,6 +136,7 @@ function StructureEditor() {
   const structure = profile.structure;
   const csv = profile.source === "csv";
   const xray = profile.source === "xray";
+  const xml = profile.source === "xml";
   /** What a node of the hierarchy is called in the source. */
   const node = xray ? "folder" : "section";
   const mappedCount = structure.levels.length;
@@ -167,7 +168,7 @@ function StructureEditor() {
     <Stack>
       <Group justify="space-between">
         <Text c="dimmed" maw={720}>
-          Every nesting level of {csv ? "the section path" : xray ? "the Xray test repository folders" : "TestRail sections"} becomes its own custom field in Allure TestOps, so you
+          Every nesting level of {csv ? "the section path" : xml ? "the named elements around the test cases (suites, sections, folders)" : xray ? "the Xray test repository folders" : "TestRail sections"} becomes its own custom field in Allure TestOps, so you
           can build a tree like <i>Epic → Feature → Story</i> instead of generic <i>Section1, Section2</i> fields.
         </Text>
         <RefreshButton />
@@ -194,7 +195,9 @@ function StructureEditor() {
             <Alert color="blue">
               {csv
                 ? "The path column is empty in every row."
-                : xray
+                : xml
+                  ? "The test cases of this file are not inside named elements such as suites or sections, so there is nothing to map here."
+                  : xray
                   ? "The sampled tests are not in folders of the test repository; nothing to map here."
                   : "The selected suites have no sections; only the suite can be mapped."}
             </Alert>
@@ -283,7 +286,7 @@ function StructureEditor() {
                       <Table.Td>
                         <Text size="sm">{level.examples.join(", ")}</Text>
                         <Text size="xs" c="dimmed">
-                          {level.sectionCount} {node}(s){level.caseCount ? `, ${level.caseCount} sampled ${xray ? "test" : "case"}(s) directly here` : ""}
+                          {level.sectionCount} {node}(s){level.caseCount ? `, ${level.caseCount} ${csv || xml ? "" : "sampled "}${xray ? "test" : "case"}(s) directly here` : ""}
                         </Text>
                       </Table.Td>
                       <Table.Td>
@@ -342,7 +345,7 @@ function StructureEditor() {
           <Title order={4}>Tree</Title>
           <Switch
             label="Create an Allure TestOps tree from these fields"
-            description={`The tree shows migrated cases grouped the same way as in ${csv ? "the file" : xray ? "Xray" : "TestRail"}. An existing tree with the same name is kept as is.`}
+            description={`The tree shows migrated cases grouped the same way as in ${csv || xml ? "the file" : xray ? "Xray" : "TestRail"}. An existing tree with the same name is kept as is.`}
             checked={structure.createTree}
             onChange={(e) => {
               const value = e.currentTarget.checked;
@@ -392,7 +395,7 @@ function StructureEditor() {
           <Table verticalSpacing="xs">
             <Table.Thead>
               <Table.Tr>
-                <Table.Th>{csv ? "Path in the file" : xray ? "Xray folder" : "TestRail"}</Table.Th>
+                <Table.Th>{csv || xml ? "Path in the file" : xray ? "Xray folder" : "TestRail"}</Table.Th>
                 <Table.Th>Allure TestOps custom fields</Table.Th>
               </Table.Tr>
             </Table.Thead>

@@ -1,0 +1,156 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<suite>
+	<id>S1</id>
+	<name>Master</name>
+	<description></description>
+	<sections>
+		<section>
+		<name>Web shop</name>
+		<description>&lt;p&gt;Everything in the browser.&lt;/p&gt;</description>
+			<cases>
+				<case>
+					<id>C10</id>
+					<title>Release smoke checklist</title>
+					<template>Test Case (Steps)</template>
+					<type>Smoke &amp; Sanity</type>
+					<priority>High</priority>
+					<estimate>5400</estimate>
+					<references></references>
+					<custom>
+						<automation_type><id>0</id><value> None</value></automation_type>
+						<browser><id>4</id><value> Edge</value></browser>
+						<steps_separated><step>
+<content>Open the home page</content><expected></expected><additional_info></additional_info></step>
+<step>
+<content>Log in as a customer</content><expected></expected><additional_info></additional_info></step>
+</steps_separated>
+						<platforms><item>
+<id>4</id><value>API</value></item>
+</platforms>
+					</custom>
+					<is_converted>0</is_converted>
+				</case>
+			</cases>
+			<sections>
+				<section>
+				<name>Auth</name>
+				<description></description>
+					<sections>
+						<section>
+						<name>Password</name>
+						<description></description>
+							<cases>
+								<case>
+									<id>C11</id>
+									<title>Reset a forgotten password</title>
+									<template>Test Case (Steps)</template>
+									<type>Security</type>
+									<priority>Critical</priority>
+									<estimate></estimate>
+									<references>REQ-1, REQ-7</references>
+									<attachments>
+										<attachment>
+											<id>501</id>
+											<data_id>501</data_id>
+											<name>screenshot.png</name>
+											<url>https://testrail.example.com/index.php?/attachments/get/501</url>
+										</attachment>
+										<attachment>
+											<id>501</id>
+											<data_id>501</data_id>
+											<name>screenshot.png</name>
+											<url>https://testrail.example.com/index.php?/attachments/get/501</url>
+										</attachment>
+										<attachment>
+											<id>502</id>
+											<data_id>502</data_id>
+											<name>test-data.csv</name>
+											<url>https://testrail.example.com/index.php?/attachments/get/502</url>
+										</attachment>
+									</attachments>
+									<custom>
+										<automation_type><id>0</id><value> None</value></automation_type>
+										<build>build-100</build>
+										<flaky>false</flaky>
+										<browser><id>1</id><value> Chrome</value></browser>
+										<review_date>2026-01-01</review_date>
+										<preconds>See the screenshot:
+
+![](index.php?/attachments/get/501)
+
+**User** `jane@example.com` exists.</preconds>
+										<steps_separated><step>
+<content>&lt;p&gt;Open the login page&lt;/p&gt;
+</content><additional_info>&lt;p&gt;URL: `/login`&lt;/p&gt;
+</additional_info><id>8</id></step>
+<step>
+<content>Click **Forgot password?**</content><expected>The reset form is shown</expected><additional_info></additional_info></step>
+<step>
+<content>Enter the email</content><expected></expected><additional_info>|||:Field|:Value
+||Email|jane@example.com</additional_info></step>
+</steps_separated>
+										<platforms><item>
+<id>1</id><value>Web</value></item>
+<item>
+<id>2</id><value>iOS</value></item>
+</platforms>
+									</custom>
+									<is_converted>0</is_converted>
+								</case>
+								<case>
+									<id>C12</id>
+									<title>Password rules</title>
+									<template>Behaviour Driven Development</template>
+									<type>Functional</type>
+									<priority>High</priority>
+									<estimate></estimate>
+									<references></references>
+									<custom>
+										<browser><id>1</id><value> Chrome</value></browser>
+										<testrail_bdd_scenario><scenario><index>1</index><content>Scenario: Password rules
+Given I am on the sign-up page
+When I enter a short password
+Then I see "At least 8 characters"</content></scenario></testrail_bdd_scenario>
+									</custom>
+									<is_converted>0</is_converted>
+								</case>
+							</cases>
+						</section>
+					</sections>
+				</section>
+			</sections>
+		</section>
+		<section>
+		<name>API</name>
+		<description></description>
+			<cases>
+				<case>
+					<id>C13</id>
+					<title>Orders API smoke</title>
+					<template>Test Case (Text)</template>
+					<type>Automated</type>
+					<priority>Medium</priority>
+					<estimate>120</estimate>
+					<references></references>
+					<custom>
+						<browser><id>2</id><value> Firefox</value></browser>
+						<steps>1. Create an order
+2. Pay for it</steps>
+						<expected>The order is paid.</expected>
+					</custom>
+					<is_converted>0</is_converted>
+				</case>
+				<case>
+					<id>C14</id>
+					<title></title>
+					<template>Test Case (Text)</template>
+					<type>Other</type>
+					<priority>Low</priority>
+					<custom>
+						<expected>A case without a title.</expected>
+					</custom>
+				</case>
+			</cases>
+		</section>
+	</sections>
+</suite>

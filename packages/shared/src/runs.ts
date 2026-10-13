@@ -6,6 +6,8 @@ export function runSource(profile: Profile): string {
   switch (profile.source) {
     case "csv":
       return `csv:${profile.csv.fileId ?? ""}`;
+    case "xml":
+      return `xml:${profile.xml.fileId ?? ""}#${profile.xml.caseElement ?? ""}`;
     case "xray":
       return `xray:${profile.xray.connection.jiraUrl.replace(/\/+$/, "")}#${profile.xray.scope.projectKey}#${profile.xray.scope.jql.trim()}`;
     default:

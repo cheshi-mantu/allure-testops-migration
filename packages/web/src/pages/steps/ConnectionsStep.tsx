@@ -2,7 +2,7 @@ import { Alert, Anchor, Autocomplete, Button, Card, Collapse, Group, NumberInput
 import { IconAlertCircle, IconCircleCheck } from "@tabler/icons-react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
-import { SECRET_MASK, TESTRAIL_RATE_LIMITS, XRAY_REGIONS, type TestRailConnection } from "@atm/shared";
+import { isFileSource, SECRET_MASK, TESTRAIL_RATE_LIMITS, XRAY_REGIONS, type TestRailConnection } from "@atm/shared";
 import { api, errorText, type CheckResult } from "../../api/client";
 import { useProfile } from "../../components/ProfileContext";
 
@@ -69,7 +69,7 @@ export function ConnectionsStep() {
       <Text c="dimmed">
         Credentials are stored only in this tool's data volume and are never included in an export unless you ask for it.
       </Text>
-      <SimpleGrid cols={{ base: 1, lg: profile.source === "csv" ? 1 : 2 }} maw={profile.source === "csv" ? 640 : undefined}>
+      <SimpleGrid cols={{ base: 1, lg: isFileSource(profile.source) ? 1 : 2 }} maw={isFileSource(profile.source) ? 640 : undefined}>
         {profile.source === "xray" && <XrayConnectionCard />}
         {profile.source === "testrail" && (
         <Card withBorder>

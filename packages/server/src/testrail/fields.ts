@@ -13,6 +13,8 @@ const KIND_BY_TYPE_ID: Record<number, TestRailFieldKind> = {
   9: "milestone",
   10: "steps",
   12: "multiselect",
+  // BDD scenarios (TestRail 10.2 and later): a list of Gherkin texts.
+  13: "text",
 };
 
 export interface FieldDefinition {
@@ -154,6 +156,11 @@ export class FieldCatalog {
     if (field?.options) {
       const ids = (Array.isArray(raw) ? raw : [raw]).map((v) => String(v)).filter((v) => v !== "");
       return { ids, labels: ids.map((id) => field.options?.get(id) ?? id) };
+    }
+    if (Array.isArray(raw) && raw.length > 0 && raw.every((item) => item !== null && typeof item === "object" && typeof (item as { content?: unknown }).content === "string")) {
+      // BDD scenarios: [{ content: "Scenario: ..." }].
+      const text = (raw as { content: string }[]).map((item) => item.content.trim()).filter(Boolean).join("\n\n");
+      return { ids: [], labels: text ? [text] : [] };
     }
     if (field?.kind === "date" && typeof raw === "string") {
       return { ids: [], labels: [raw] };

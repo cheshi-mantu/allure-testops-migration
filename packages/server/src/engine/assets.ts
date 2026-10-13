@@ -1,6 +1,7 @@
 import type { PlannedStep, Profile } from "@atm/shared";
 import { separatedSteps } from "../convert/steps.js";
 import type { TestRailClient } from "../testrail/client.js";
+import type { TrSharedStep, TrStep } from "../testrail/types.js";
 import { AttachmentSource, type DownloadedAttachment } from "./attachments.js";
 
 /** Attachments of one source case. */
@@ -26,6 +27,15 @@ export interface SourceAssets {
   attachmentHint?: string;
 }
 
+/** Steps of a shared step; the field is `custom_steps_separated` unless the instance renamed it. */
+function sharedStepSteps(shared: TrSharedStep): TrStep[] {
+  if (Array.isArray(shared.custom_steps_separated)) {
+    return shared.custom_steps_separated;
+  }
+  const renamed = Object.entries(shared).find(([key, value]) => key.endsWith("steps_separated") && Array.isArray(value));
+  return (renamed?.[1] as TrStep[] | undefined) ?? [];
+}
+
 export function testRailAssets(client: TestRailClient, profile: Profile): SourceAssets {
   return {
     attachmentHint:
@@ -36,7 +46,7 @@ export function testRailAssets(client: TestRailClient, profile: Profile): Source
       return {
         id: shared.id,
         title: shared.title,
-        steps: separatedSteps(shared.custom_steps_separated ?? [], { format: profile.options.textFormat }, false),
+        steps: separatedSteps(sharedStepSteps(shared), { format: profile.options.textFormat }, false),
       };
     },
   };

@@ -10,6 +10,7 @@ import { loadTestRailContext } from "../testrail/discovery.js";
 import type { TrCase } from "../testrail/types.js";
 import { noAssets, testRailAssets, type SourceAssets } from "./assets.js";
 import { KnownProblem } from "./problems.js";
+import { loadXml, requireNameField, transformXmlCase, xmlCases, type XmlCase } from "../xml/source.js";
 import { XrayAssets } from "../xray/assets.js";
 import { loadXrayContext, readCalledTests, readXrayCases } from "../xray/discovery.js";
 import { transformXrayCase, type XrayContext } from "../xray/transform.js";
@@ -54,11 +55,37 @@ export async function prepareSource(profile: Profile, deps: SourceDeps, log: Log
   switch (profile.source) {
     case "csv":
       return prepareCsv(profile, deps, log);
+    case "xml":
+      return prepareXml(profile, deps, log);
     case "xray":
       return prepareXray(profile, log, onRetry);
     default:
       return prepareTestRail(profile, log, onRetry);
   }
+}
+
+type XmlSourceCase = SourceCase & { raw: XmlCase };
+
+async function prepareXml(profile: Profile, deps: SourceDeps, log: Log): Promise<PreparedSource<XmlSourceCase>> {
+  requireNameField(profile);
+  const { doc, fileName } = await loadXml(profile, deps.files);
+  doc.warnings.forEach((warning) => log("warn", warning));
+  const { cases, warnings } = xmlCases(doc, profile);
+  warnings.forEach((warning) => log("warn", warning));
+  const lists = doc.stepLists.map((list) => `"${list.field}"`).join(", ");
+  log("info", `File "${fileName}": ${cases.length} "${doc.caseElement}" element(s)${lists ? `, steps in ${lists}` : ""}.`);
+  return {
+    name: "XML",
+    assets: noAssets,
+    testrail: null,
+    transform: (testCase) => transformXmlCase(testCase.raw, profile, doc),
+    readCases: async () => {
+      const all = cases.map((raw) => ({ key: raw.key, title: raw.name || `line ${raw.line}`, line: raw.line, raw }));
+      // A trial run on a few cases, chosen by id or name.
+      const only = new Set(profile.xml.onlyCases.map((v) => v.trim().toLowerCase()).filter(Boolean));
+      return only.size > 0 ? all.filter((c) => only.has(c.key.toLowerCase()) || only.has(c.title.toLowerCase())) : all;
+    },
+  };
 }
 
 type XraySourceCase = SourceCase & { raw: XrayCase };

@@ -100,8 +100,8 @@ export function ProfilesPage() {
             </Group>
             <Text size="sm" c="dimmed" truncate>
               From:{" "}
-              {profile.source === "csv"
-                ? `CSV ${profile.fileName ? `"${profile.fileName}"` : "file not chosen"}`
+              {profile.source === "csv" || profile.source === "xml"
+                ? `${profile.source === "xml" ? "XML" : "CSV"} ${profile.fileName ? `"${profile.fileName}"` : "file not chosen"}`
                 : profile.source === "xray"
                   ? `Xray project ${profile.xrayProject || "not chosen"}`
                   : profile.testrailEndpoint || "not set"}
@@ -131,7 +131,7 @@ export function ProfilesPage() {
                 const next = value as SourceType;
                 setSource(next);
                 if (!nameTouched) {
-                  setName(next === "csv" ? "CSV import" : next === "xray" ? "Xray migration" : "TestRail migration");
+                  setName(next === "csv" ? "CSV import" : next === "xml" ? "XML import" : next === "xray" ? "Xray migration" : "TestRail migration");
                 }
               }}
             >
@@ -146,6 +146,11 @@ export function ProfilesPage() {
                   value="csv"
                   label="CSV file"
                   description="Any spreadsheet export: one or several rows per test case, steps in one cell or one per row."
+                />
+                <Radio
+                  value="xml"
+                  label="XML file"
+                  description="An XML export of a test management tool, e.g. TestRail or TestLink: the test case element, its fields, steps and sections are found in the file."
                 />
               </Stack>
             </Radio.Group>

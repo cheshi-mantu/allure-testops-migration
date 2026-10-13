@@ -1,0 +1,75 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite id="" name="" >
+<node_order><![CDATA[]]></node_order>
+<details><![CDATA[]]></details>
+<testsuite id="3" name="Login" >
+<node_order><![CDATA[1]]></node_order>
+<details><![CDATA[<p>Everything about signing in.</p>]]></details>
+<testcase internalid="10" name="Valid login">
+	<node_order><![CDATA[1000]]></node_order>
+	<externalid><![CDATA[1]]></externalid>
+	<fullexternalid><![CDATA[PRJ-1]]></fullexternalid>
+	<version><![CDATA[1]]></version>
+	<summary><![CDATA[<p>Checks that a <strong>registered</strong> user can sign in.</p>]]></summary>
+	<preconditions><![CDATA[<p>The user exists.</p>]]></preconditions>
+	<execution_type><![CDATA[1]]></execution_type>
+	<importance><![CDATA[3]]></importance>
+	<status>7</status>
+	<steps>
+		<step>
+			<step_number><![CDATA[1]]></step_number>
+			<actions><![CDATA[<p>Open the login page</p>]]></actions>
+			<expectedresults><![CDATA[<p>The form is shown</p>]]></expectedresults>
+			<execution_type><![CDATA[1]]></execution_type>
+		</step>
+		<step>
+			<step_number><![CDATA[2]]></step_number>
+			<actions><![CDATA[<p>Enter the credentials and submit</p>]]></actions>
+			<expectedresults><![CDATA[<p>The dashboard opens</p>]]></expectedresults>
+			<execution_type><![CDATA[1]]></execution_type>
+		</step>
+	</steps>
+	<keywords>
+		<keyword name="smoke"><notes><![CDATA[]]></notes></keyword>
+		<keyword name="login"><notes><![CDATA[]]></notes></keyword>
+	</keywords>
+	<custom_fields>
+		<custom_field><name><![CDATA[Browser]]></name><value><![CDATA[Chrome]]></value></custom_field>
+		<custom_field><name><![CDATA[Team]]></name><value><![CDATA[Identity]]></value></custom_field>
+	</custom_fields>
+	<requirements>
+		<requirement><req_spec_title><![CDATA[Auth]]></req_spec_title><doc_id><![CDATA[REQ-1]]></doc_id><title><![CDATA[Users can log in]]></title></requirement>
+		<requirement><req_spec_title><![CDATA[Auth]]></req_spec_title><doc_id><![CDATA[REQ-2]]></doc_id><title><![CDATA[Sessions]]></title></requirement>
+	</requirements>
+</testcase>
+<testsuite id="4" name="Errors" >
+<node_order><![CDATA[2]]></node_order>
+<details><![CDATA[]]></details>
+<testcase internalid="11" name="Wrong password">
+	<node_order><![CDATA[1001]]></node_order>
+	<externalid><![CDATA[2]]></externalid>
+	<fullexternalid><![CDATA[PRJ-2]]></fullexternalid>
+	<version><![CDATA[2]]></version>
+	<summary><![CDATA[<p>The error is shown.</p>]]></summary>
+	<preconditions><![CDATA[]]></preconditions>
+	<execution_type><![CDATA[2]]></execution_type>
+	<importance><![CDATA[2]]></importance>
+	<status>1</status>
+	<steps>
+		<step>
+			<step_number><![CDATA[1]]></step_number>
+			<actions><![CDATA[<p>Enter a wrong password</p>]]></actions>
+			<expectedresults><![CDATA[<p>An error is shown</p>]]></expectedresults>
+			<execution_type><![CDATA[2]]></execution_type>
+		</step>
+	</steps>
+	<keywords>
+		<keyword name="negative"><notes><![CDATA[]]></notes></keyword>
+	</keywords>
+	<custom_fields>
+		<custom_field><name><![CDATA[Browser]]></name><value><![CDATA[Firefox]]></value></custom_field>
+	</custom_fields>
+</testcase>
+</testsuite>
+</testsuite>
+</testsuite>

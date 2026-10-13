@@ -11,6 +11,7 @@ import {
   type CsvFilePreview,
   type PlannedCase,
   type StoredFileInfo,
+  type XmlFilePreview,
   type Profile,
   type ProfileListItem,
 } from "@atm/shared";
@@ -30,6 +31,7 @@ import { HttpError } from "../http/httpClient.js";
 import { prepareSource } from "../engine/sources.js";
 import type { FileStore } from "../storage/fileStore.js";
 import { checkTestOps, checkTestRail, checkXray } from "./checks.js";
+import { discoverXml, previewXml } from "../xml/source.js";
 import { discoverXray, loadXrayContext, readCalledTests, readXrayCase } from "../xray/discovery.js";
 import { transformXrayCase } from "../xray/transform.js";
 
@@ -51,7 +53,7 @@ function newId(): string {
 export async function registerApi(app: FastifyInstance, deps: ApiDeps): Promise<void> {
   const { profiles, runs, runner, files } = deps;
 
-  app.addContentTypeParser(["application/octet-stream", "text/csv", "application/vnd.ms-excel"], { parseAs: "buffer", bodyLimit: MAX_UPLOAD_BYTES }, (_request, body, done) =>
+  app.addContentTypeParser(["application/octet-stream", "text/csv", "application/vnd.ms-excel", "text/xml", "application/xml"], { parseAs: "buffer", bodyLimit: MAX_UPLOAD_BYTES }, (_request, body, done) =>
     done(null, body),
   );
 
@@ -108,7 +110,7 @@ export async function registerApi(app: FastifyInstance, deps: ApiDeps): Promise<
         id: profile.id,
         name: profile.name,
         source: profile.source,
-        fileName: profile.csv.fileId ? (fileNames.get(profile.csv.fileId) ?? null) : null,
+        fileName: fileNames.get((profile.source === "xml" ? profile.xml.fileId : profile.csv.fileId) ?? "") ?? null,
         updatedAt: profile.updatedAt,
         testrailEndpoint: profile.testrail.connection.endpoint,
         xrayProject: profile.xray.scope.projectKey,
@@ -196,8 +198,18 @@ export async function registerApi(app: FastifyInstance, deps: ApiDeps): Promise<
     return { suiteMode: project.suite_mode, suites: suites.map((s) => ({ id: s.id, name: s.name })) };
   });
 
-  const discoverSource = async (profile: Profile) =>
-    profile.source === "csv" ? discoverCsv(profile, files) : profile.source === "xray" ? discoverXray(profile) : discoverTestRail(profile);
+  const discoverSource = async (profile: Profile) => {
+    switch (profile.source) {
+      case "csv":
+        return discoverCsv(profile, files);
+      case "xml":
+        return discoverXml(profile, files);
+      case "xray":
+        return discoverXray(profile);
+      default:
+        return discoverTestRail(profile);
+    }
+  };
   app.post<{ Params: { id: string } }>("/api/profiles/:id/source/discover", async (request) => discoverSource(await load(request.params.id)));
   app.post<{ Params: { id: string } }>("/api/profiles/:id/testrail/discover", async (request) => discoverSource(await load(request.params.id)));
 
@@ -207,7 +219,9 @@ export async function registerApi(app: FastifyInstance, deps: ApiDeps): Promise<
     const [list, all] = await Promise.all([files.list(), profiles.list()]);
     return list.map((file) => ({
       ...file,
-      usedBy: all.filter((p) => p.source === "csv" && p.csv.fileId === file.id).map((p) => ({ id: p.id, name: p.name })),
+      usedBy: all
+        .filter((p) => (p.source === "csv" && p.csv.fileId === file.id) || (p.source === "xml" && p.xml.fileId === file.id))
+        .map((p) => ({ id: p.id, name: p.name })),
     }));
   };
 
@@ -249,6 +263,7 @@ export async function registerApi(app: FastifyInstance, deps: ApiDeps): Promise<
       warnings: table.warnings,
     };
   });
+  app.get<{ Params: { id: string } }>("/api/profiles/:id/xml/preview", async (request): Promise<XmlFilePreview> => previewXml(await load(request.params.id), files));
   app.post<{ Params: { id: string } }>("/api/profiles/:id/testops/discover", async (request) => discoverTestOps(await load(request.params.id)));
 
   app.get<{ Params: { id: string }; Querystring: { name?: string } }>("/api/profiles/:id/testops/cf-values", async (request) => {
@@ -270,7 +285,7 @@ export async function registerApi(app: FastifyInstance, deps: ApiDeps): Promise<
   app.post<{ Params: { id: string } }>("/api/profiles/:id/preview", async (request): Promise<PlannedCase & { linkedCaseIds: string[] }> => {
     const { caseId: rawId } = z.object({ caseId: z.coerce.string().trim().min(1) }).parse(request.body);
     const profile = await load(request.params.id);
-    if (profile.source === "csv") {
+    if (profile.source === "csv" || profile.source === "xml") {
       const source = await prepareSource(profile, { files }, () => undefined);
       const cases = await source.readCases(() => undefined, () => false);
       const wanted = rawId.toLowerCase();

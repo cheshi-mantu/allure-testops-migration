@@ -123,8 +123,13 @@ export const StructureMappingSchema = z.object({
 });
 export type StructureMapping = z.infer<typeof StructureMappingSchema>;
 
-export const SOURCES = ["testrail", "csv", "xray"] as const;
+export const SOURCES = ["testrail", "csv", "xray", "xml"] as const;
 export type SourceType = (typeof SOURCES)[number];
+
+/** Sources that read an uploaded file instead of connecting to a system. */
+export function isFileSource(source: SourceType): source is "csv" | "xml" {
+  return source === "csv" || source === "xml";
+}
 
 export const CSV_ENCODINGS = ["auto", "utf-8", "utf-16le", "utf-16be", "windows-1252", "windows-1251", "iso-8859-1"] as const;
 export const CSV_STEP_FORMATS = ["auto", "lines", "indented", "numbered", "testops", "regex", "single"] as const;
@@ -163,6 +168,28 @@ export const CsvSourceSchema = z.object({
 });
 export type CsvSource = z.infer<typeof CsvSourceSchema>;
 export type CsvStepFormat = (typeof CSV_STEP_FORMATS)[number];
+
+/**
+ * How an XML export is read. The structure is found in the file: the element that repeats per test
+ * case, the named elements around it (suites, sections, folders) and the list of steps inside it.
+ */
+export const XmlSourceSchema = z.object({
+  /** File in the tool's file library (data volume). */
+  fileId: z.string().nullable().default(null),
+  /** Element that holds one test case, e.g. `case` or `testcase`. Null detects it. */
+  caseElement: z.string().nullable().default(null),
+  /** Trial run: only cases with these ids or names. Empty means all. */
+  onlyCases: z.array(z.string()).default([]),
+  /** How a text field mapped to the scenario is split into steps; lists of step elements need no settings. */
+  steps: z
+    .object({
+      format: z.enum(CSV_STEP_FORMATS).default("auto"),
+      stepPattern: z.string().default(""),
+      expectedPattern: z.string().default(""),
+    })
+    .prefault({}),
+});
+export type XmlSource = z.infer<typeof XmlSourceSchema>;
 
 export const TEXT_TARGETS = ["description", "precondition", "expectedResult"] as const;
 export type TextTarget = (typeof TEXT_TARGETS)[number];
@@ -251,6 +278,7 @@ export const ProfileSchema = z.object({
     scope: TestRailScopeSchema.prefault({}),
   }).prefault({}),
   csv: CsvSourceSchema.prefault({}),
+  xml: XmlSourceSchema.prefault({}),
   xray: z.object({
     connection: XrayConnectionSchema.prefault({}),
     scope: XrayScopeSchema.prefault({}),
