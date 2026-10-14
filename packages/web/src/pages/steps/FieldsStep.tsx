@@ -44,6 +44,7 @@ const TARGET_LABELS: Record<FieldTargetKind, string> = {
   owner: "Owner",
   link: "Links",
   attachment: "Attachments (files by their address)",
+  examples: "Examples of the test case (parameter sets)",
   issue: "Issues",
   description: "Description",
   precondition: "Precondition",
@@ -388,6 +389,10 @@ function FieldRow({
           </Text>
           {field.examples.length > 0 && (
             <Stack gap={2} mt={6}>
+              <Text size="xs" c="dimmed">
+                {field.examples.length > 1 ? `Examples from different ${field.kind === "column" && profile.source === "csv" ? "rows" : "cases"}` : "Example"}
+                {field.examples.some((example) => example.includes("↵")) ? ", ↵ is a line break inside a value:" : ":"}
+              </Text>
               {field.examples.map((example) => (
                 <Text key={example} size="xs" lineClamp={2} className="mono">
                   “{example}”
@@ -460,6 +465,12 @@ function FieldRow({
               />
             )}
             {target.kind === "scenario" && field.kind === "column" && <StepFormatSettings />}
+            {target.kind === "examples" && (
+              <Text size="xs" c="dimmed">
+                Every combination of the parameter values becomes an example of the case; parameters of a group change together. More than 100
+                combinations stay in the description as text.
+              </Text>
+            )}
             {target.kind === "attachment" && (
               <Text size="xs" c="dimmed">
                 {profile.xml.files.download
@@ -481,7 +492,7 @@ function FieldRow({
             {(field.options === null || field.kind === "column") && SPLIT_TARGETS.includes(target.kind) && (
               <TextInput
                 label="Split values by"
-                description="E.g. a comma for “ABC-1, ABC-2”. Leave empty to keep one value."
+                description="E.g. a comma for “ABC-1, ABC-2”, or \n for a value per line. Leave empty to keep one value."
                 w={260}
                 value={mapping.separator}
                 onChange={(e) => {

@@ -16,6 +16,7 @@
  *   npx tsx dev/qase-seed.ts --project DEMO --cleanup --yes            # removes the seeded suites, cases, shared steps and milestones
  *   npx tsx dev/qase-seed.ts --project DEMO --cleanup --fields --yes   # also deletes the "ATM" custom fields of the workspace
  */
+import { HttpError } from "../packages/server/src/http/httpClient.js";
 import { QaseClient } from "../packages/server/src/qase/client.js";
 import type { QaseCase, QaseCustomField, QaseMilestone, QaseSharedStep, QaseSuite } from "../packages/server/src/qase/types.js";
 import { wikiToMarkdown } from "../packages/server/src/xray/wiki.js";
@@ -47,7 +48,9 @@ if (!code) {
 }
 const token = process.env.QASE_API_TOKEN;
 if (!token) {
-  fail("Set the environment variable QASE_API_TOKEN. See the top of dev/qase-seed.ts.");
+  fail(
+    "The environment variable QASE_API_TOKEN is not set for this script. Run: export QASE_API_TOKEN=<token>. A variable set without export is shown by echo but not passed to programs started from the shell.",
+  );
 }
 
 const log = (message: string) => console.log(message);
@@ -275,6 +278,18 @@ function classicStep(step: StepTemplate) {
   };
 }
 
+/**
+ * Gherkin that the Qase API accepts: it answers 500 to Feature and Scenario lines (the case title
+ * says it) and to doc strings, whose content goes to the end of the step before them.
+ */
+export function qaseGherkin(gherkin: string): string {
+  return gherkin
+    .replace(/^\s*(Feature|Scenario( Outline)?|Background):.*$/gm, "")
+    .replace(/:?\s*\n\s*("""|```)[^\n]*\n([\s\S]*?)\n\s*\1[^\n]*/g, (_match, _fence: string, content: string) => ` ${content.replace(/\s*\n\s*/g, " ").trim()}`)
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
 /** A Qase case from a generated test. `index` drives the variety, so reruns give the same cases. */
 function caseBody(test: GeneratedTest, index: number, userId: number | null) {
   const rnd = random(index + 1000);
@@ -318,8 +333,7 @@ function caseBody(test: GeneratedTest, index: number, userId: number | null) {
   let stepsType: "classic" | "gherkin" = "classic";
   if (test.type === "Cucumber" && test.gherkin) {
     stepsType = "gherkin";
-    // Qase keeps the steps of a scenario; the Feature and Scenario lines belong to the case title.
-    steps = [{ value: test.gherkin.replace(/^\s*(Feature|Scenario( Outline)?|Background):.*$/gm, "").trim() }];
+    steps = [{ value: qaseGherkin(test.gherkin) }];
   } else if (test.steps?.length) {
     const classic = test.steps.map(classicStep);
     // Every sixth case: the steps after the first one are nested under it, two levels deep.
@@ -477,10 +491,27 @@ async function cleanup() {
 // ------------------------------------------------------------------ main
 
 async function main() {
-  const project = await qase.project(code!).catch(() => null);
+  let project: Awaited<ReturnType<typeof qase.project>> | null = null;
+  try {
+    project = await qase.project(code!);
+  } catch (error) {
+    const status = error instanceof HttpError ? error.status : 0;
+    if (status === 401) {
+      fail("Qase rejected the API token in QASE_API_TOKEN: it is wrong or was revoked. Create a token in Qase (your profile, API tokens).");
+    }
+    if (status !== 404) {
+      fail(`Cannot read project ${code} from Qase: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
   if (!project) {
     if (!flag("create") || flag("cleanup")) {
-      fail(`Project ${code} was not found with this token. Check the code, or add --create to create it.`);
+      // The token works: say which projects it can see, the code is likely one of them.
+      const known = await qase.projects().catch(() => []);
+      fail(
+        `Qase has no project with the code ${code}, or the token cannot see it.` +
+          (known.length > 0 ? ` Projects of this token: ${known.map((p) => `${p.code} (${p.title})`).join(", ")}.` : " This token sees no projects.") +
+          " Pass one of them with --project, or add --create to create the project.",
+      );
     }
     await write(`project ${code}`, () => qase.send("POST", "project", { title: `${PREFIX} seed ${code}`, code, access: "all" }));
   } else {

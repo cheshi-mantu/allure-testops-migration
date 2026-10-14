@@ -34,7 +34,7 @@ Profiles and run logs are stored in the `migration-data` Docker volume. Use **Ex
 2. **Projects.** The TestRail project, optionally some suites or a list of case ids for a trial run, and the target Allure TestOps project.
 3. **Suites & sections.** The tool scans the section tree of the selected suites and shows how deep it is and which sections sit on each level. Each level gets its own Allure TestOps custom field (for example *Epic*, *Feature*, *Story*) instead of generic `Section1..N` fields. Levels deeper than the ones you map are either joined into the last mapped level (`Login / Errors`) or dropped. The suite name can go to its own field. The tool can create an Allure TestOps tree built from these fields.
 4. **Fields.** Every TestRail field (system and custom) with its type, how often it is filled and example values from sampled cases. Choose a target for each: custom field, tags, layer, status, owner, links, issues, description, precondition, expected result, comment or scenario. Fields with a list of values (dropdowns, priorities, types, users, milestones, checkboxes) show all values with counts; each can be renamed, pointed at an existing Allure TestOps value or skipped. TestRail users are matched to Allure TestOps accounts by email automatically.
-5. **Options.** Migration tag prefix, extra tag, link back to TestRail, text format (HTML detection), how plain text steps are split, attachments, shared steps, deleted cases and parallelism.
+5. **Options.** Migration tag prefix, extra tag, link back to TestRail, text format (HTML detection), how plain text steps are split, where tables of Gherkin Examples go, attachments, shared steps, deleted cases and parallelism.
 6. **Preview.** Converts one real case with the current settings and shows exactly what will be written, including custom fields, text, scenario, attachments and warnings. Nothing is written.
 7. **Run.** A dry run converts every case and checks the plan against Allure TestOps: custom fields and values that will be created, unknown owners and statuses, issues without an integration. The migration shows live progress and a log with links to both systems. Runs can be stopped and repeated.
 
@@ -90,7 +90,7 @@ Xray keeps the details of a test (type, steps, Cucumber or generic definition, f
 | Comments | Comments |
 | Issue attachments, images in text | Test case attachments; images keep their place in text |
 
-Every migrated case gets the tag `xray:<issue key>`. Xray step text and definitions are converted from Jira wiki markup; step text becomes plain text, as Allure TestOps shows step text without formatting.
+Every migrated case gets the tag `xray:<issue key>`, in lower case like every tag: `xray:calc-12`. Xray step text and definitions are converted from Jira wiki markup; step text becomes plain text, as Allure TestOps shows step text without formatting.
 
 ## Qase
 
@@ -104,7 +104,8 @@ Create a profile with *Qase* as the source. The steps are Connections, Projects,
 | Qase | Allure TestOps by default |
 | --- | --- |
 | Description, pre-conditions | Description, precondition |
-| Post-conditions, parameters | Description, under their own headings; a group of parameters becomes a table |
+| Post-conditions | Description, under its own heading |
+| Parameters | Examples of the test case: every combination of the values, while the parameters of a group change together. More than 100 combinations stay in the description as text |
 | Steps (classic) | Scenario: action, data and expected result, nested steps, files of steps |
 | Steps (Gherkin) | Scenario, one step per line; an Examples table stays with its line |
 | Shared steps | Allure TestOps shared steps, or copied into each case |
@@ -116,7 +117,19 @@ Create a profile with *Qase* as the source. The steps are Connections, Projects,
 | Custom fields of the project | Custom fields with the same names; URL fields as links, text fields in the description |
 | Files of the case and of steps, images in text | Attachments; images keep their place in text |
 
-Every migrated case gets the tag `qase:<project code>-<case id>`, for example `qase:DEMO-12`, and a link back to the case in Qase. Qase text is Markdown and is kept as it is.
+Every migrated case gets the tag `qase:<project code>-<case id>`, for example `qase:demo-12`, and a link back to the case in Qase. Qase text is Markdown and is kept as it is.
+
+## Values as they are written
+
+Every value the migration writes is trimmed: spaces at the start and the end are removed, and values that are empty after that are left out. This covers names, text, custom field values, tags, links, issues, members, examples and steps.
+
+The test layer and the status are written in lower case, `e2e` and `draft`. Allure TestOps layers and statuses are matched without regard to case, so an existing layer `E2E` or status `Draft` is used as it is; a layer the migration creates is created in lower case.
+
+Every tag the migration writes is in lower case too: the migration tag, the additional tag and the tags that come from source fields (`Smoke` and `smoke` become one tag `smoke`). A case migrated earlier with a tag as the source spells it, for example `xray:CALC-12`, is still found on a rerun, and its tags are rewritten in lower case.
+
+## Gherkin Examples
+
+The table under `Examples:` of a Scenario Outline is read as a whole in every source: Gherkin cases of Qase, Cucumber tests of Xray, BDD scenarios of TestRail, and any text of a CSV or XML file mapped to the scenario. The Options step says where it goes: a Markdown file `examples.md` attached to the step that says Examples (the default), or examples of the test case, one per row with the column titles as parameter names, and then the Examples step is left out of the scenario. Reruns replace the examples of the case.
 
 ## CSV files
 
@@ -143,7 +156,7 @@ There is one XML source for every tool. The file is read by its structure, not b
 - **Steps.** A list of step elements inside a case becomes the scenario. The parts of a step are recognised by their names: action (`content`, `actions`, `step`…), expected result (`expected`, `expectedresults`…) and data (`additional_info`, `data`…). Steps without an expected result are kept. Steps written as text in one field, including BDD scenarios, can be mapped to the scenario too, with the same step formats as in CSV files. A case takes its scenario from the first of these fields that is filled.
 - **Sections.** The named elements around a case (suites, sections, folders, at any depth) are its section path. Its levels are mapped to custom fields on the Sections step exactly like TestRail sections, including the tree.
 - **Mapping.** Every field gets a suggested target from its name and content, the same way as CSV columns, and fields with a short list of values show all values with counts for renaming or skipping. Technical values (internal ids, order numbers) are set to *Do not migrate*. Numeric codes of known exports are translated as a first suggestion, for example TestLink importance `3` to `High`.
-- **Reruns.** Cases are tagged `<prefix>:<case id>` with the id as it is written in the file, for example `xml-regression:C1697`, or a hash of the name when the file has no id.
+- **Reruns.** Cases are tagged `<prefix>:<case id>` with the id as it is written in the file, for example `xml-regression:c1697`, or a hash of the name when the file has no id.
 
 - **Attached files.** An XML file holds the addresses of attached files and of images inside text, not the files. By default a field with such addresses (suggested target *Attachments*) gives links named after the files, and images in text become links. To attach the files themselves, turn on *Download attached files* on the Connection step and enter the address of the source system with a user and password or API key, or a request header. Files listed in fields mapped to *Attachments* are then downloaded and attached to the cases, and images keep their place in text and steps. *Test download* reads the first file the XML refers to and says what is wrong when it cannot. Files are downloaded only from the address you enter and the credentials are sent only to it; addresses on other hosts stay links. A file that cannot be downloaded does not stop the migration: the case is migrated, the run lists the problem, and running again adds the file.
 

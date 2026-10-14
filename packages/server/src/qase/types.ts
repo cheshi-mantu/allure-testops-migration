@@ -45,9 +45,10 @@ export interface QaseStep {
   steps?: QaseStep[];
 }
 
+/** A shared parameter comes resolved, with its `shared_id`. */
 export type QaseParameter =
-  | { type: "single"; item: { title: string; values: string[] } }
-  | { type: "group"; items: { title: string; values: string[] }[] }
+  | { type: "single"; shared_id?: string | null; item: { title: string; values: string[] } }
+  | { type: "group"; shared_id?: string | null; items: { title: string; values: string[] }[] }
   | { type: "shared"; shared_id?: string | null };
 
 export interface QaseCase {

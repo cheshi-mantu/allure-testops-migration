@@ -255,6 +255,9 @@ export type PlannedStep =
     }
   | { type: "shared"; sourceId: number; name: string };
 
+/** One example of a test case: a value for each of its parameters. */
+export type PlannedExample = { name: string; value: string }[];
+
 export interface PlannedCase {
   /** Identifies the case in the source; the migration tag is `<prefix>:<sourceId>`. */
   sourceId: string;
@@ -276,6 +279,8 @@ export interface PlannedCase {
   issues: { key: string; integrationId: number | null }[];
   /** Keys of the case in a test management system known to Allure TestOps through an integration, e.g. an Xray test key. */
   testKeys?: { key: string; integrationId: number }[];
+  /** Examples of the test case (sets of parameter values); the case keeps what it has when not set. */
+  examples?: PlannedExample[];
   comments: string[];
   attachments: PlannedAttachment[];
   scenario: PlannedStep[];

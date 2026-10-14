@@ -1,4 +1,5 @@
 import {
+  exampleText,
   mergeSuggestedMappings,
   type Profile,
   type SectionLevelInfo,
@@ -207,7 +208,7 @@ export function columnInfo(column: string, samples: string[], suggestion: Sugges
       ? [...counts.entries()].sort((a, b) => b[1] - a[1]).map(([value, count]) => ({ id: value, label: value, count }))
       : null,
     filledCount: samples.length,
-    examples: lowCardinality ? [] : [...new Set(samples)].slice(0, EXAMPLES).map((v) => v.replace(/\s+/g, " ").slice(0, 160)),
+    examples: lowCardinality ? [] : [...new Set(samples)].slice(0, EXAMPLES).map(exampleText),
     suggestedTarget: suggestion.target,
     suggestedSeparator: separator,
   };

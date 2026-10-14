@@ -121,6 +121,39 @@ function Scenario({ steps }: { steps: PlannedStep[] }) {
   );
 }
 
+/** Examples of the case as a table: a column per parameter, a row per example. */
+function Examples({ list }: { list: NonNullable<PlannedCase["examples"]> }) {
+  const names = [...new Set(list.flatMap((example) => example.map((parameter) => parameter.name)))];
+  const shown = list.slice(0, 20);
+  return (
+    <Stack gap={4}>
+      <Table withTableBorder withColumnBorders fz="xs" verticalSpacing={2}>
+        <Table.Thead>
+          <Table.Tr>
+            {names.map((name) => (
+              <Table.Th key={name}>{name}</Table.Th>
+            ))}
+          </Table.Tr>
+        </Table.Thead>
+        <Table.Tbody>
+          {shown.map((example, index) => (
+            <Table.Tr key={index}>
+              {names.map((name) => (
+                <Table.Td key={name}>{example.find((parameter) => parameter.name === name)?.value ?? ""}</Table.Td>
+              ))}
+            </Table.Tr>
+          ))}
+        </Table.Tbody>
+      </Table>
+      {list.length > shown.length && (
+        <Text size="xs" c="dimmed">
+          The first {shown.length} of {list.length}.
+        </Text>
+      )}
+    </Stack>
+  );
+}
+
 function Row({ label, children }: { label: string; children: ReactNode }) {
   return (
     <Table.Tr>
@@ -308,6 +341,11 @@ function Preview() {
                 <Row label="Scenario">
                   <Scenario steps={planned.scenario} />
                 </Row>
+                {planned.examples && planned.examples.length > 0 && (
+                  <Row label={`Examples (${planned.examples.length})`}>
+                    <Examples list={planned.examples} />
+                  </Row>
+                )}
               </Table.Tbody>
             </Table>
             {planned.linkedCaseIds.length > 0 && (

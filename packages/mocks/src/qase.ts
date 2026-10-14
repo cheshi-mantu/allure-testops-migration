@@ -397,7 +397,8 @@ export function createQaseMock(options: QaseMockOptions = {}): { app: FastifyIns
           return (shared?.steps ?? []).map((s) => ({ ...s, hash: "c-shared", shared_step_hash: step.shared!, shared_step_nested_hash: s.hash }));
         }
         if (gherkin) {
-          if (/^\s*(Feature|Scenario)/m.test(step.value ?? "")) {
+          // Like Qase: Feature and Scenario lines and doc strings make it fail.
+          if (/^\s*(Feature|Scenario)/m.test(step.value ?? "") || /"""|```/.test(step.value ?? "")) {
             throw Object.assign(new Error("Unable to create test case. Internal error."), { statusCode: 500 });
           }
           return [{ action: step.value ?? "" }];

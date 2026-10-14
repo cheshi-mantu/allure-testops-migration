@@ -1,4 +1,4 @@
-import type { TestRailFieldInfo, TestRailFieldKind, TestRailFieldOption } from "@atm/shared";
+import { exampleText, type TestRailFieldInfo, type TestRailFieldKind, type TestRailFieldOption } from "@atm/shared";
 import type { TrCase, TrCaseField, TrCaseStatus, TrCaseType, TrMilestone, TrPriority, TrTemplate, TrUser } from "./types.js";
 
 const KIND_BY_TYPE_ID: Record<number, TestRailFieldKind> = {
@@ -212,13 +212,13 @@ export function collectStats(catalog: FieldCatalog, cases: TrCase[]) {
         stat.counts.set(id, (stat.counts.get(id) ?? 0) + 1);
       }
       if (field.options === null && stat.examples.length < EXAMPLE_LIMIT) {
-        const example = value.labels
-          .join(", ")
-          .replace(/<[^>]+>/g, " ")
-          .replace(/&nbsp;/g, " ")
-          .replace(/\s+/g, " ")
-          .trim()
-          .slice(0, EXAMPLE_LENGTH);
+        const example = exampleText(
+          value.labels
+            .join(", ")
+            .replace(/<(br|\/p|\/li|\/div)\b[^>]*>/gi, "\n")
+            .replace(/<[^>]+>/g, " ")
+            .replace(/&nbsp;/g, " "),
+        ).slice(0, EXAMPLE_LENGTH);
         if (example && !stat.examples.includes(example)) {
           stat.examples.push(example);
         }

@@ -37,9 +37,9 @@ export function OptionsStep() {
               csv
                 ? `Every case gets the tag "${prefixShown}:<case id>". Reruns find cases by this tag and update them.`
                 : qase
-                  ? `Every case gets the tag "${prefixShown}:<project code>-<case id>", e.g. "${prefixShown}:DEMO-12". Reruns find cases by this tag and update them.`
+                  ? `Every case gets the tag "${prefixShown}:<project code>-<case id>", e.g. "${prefixShown}:demo-12". Reruns find cases by this tag and update them.`
                   : xray
-                  ? `Every case gets the tag "${prefixShown}:<issue key>", e.g. "${prefixShown}:CALC-12". Reruns find cases by this tag and update them.`
+                  ? `Every case gets the tag "${prefixShown}:<issue key>", e.g. "${prefixShown}:calc-12". Reruns find cases by this tag and update them.`
                   : `Every case gets the tag "${prefixShown}:<TestRail id>". Reruns find cases by this tag and update them. Keep "testrail" to continue a migration made with the previous migration tool.`
             }
             placeholder={xml ? "e.g. xml-regression" : csv ? "e.g. csv-regression" : xray ? "xray" : qase ? "qase" : "testrail"}
@@ -122,6 +122,21 @@ export function OptionsStep() {
             </Stack>
           </Radio.Group>
           )}
+          <Radio.Group
+            label="Tables of Gherkin Examples"
+            description="The table under Examples: of a Scenario Outline, in any text mapped to the scenario."
+            value={options.gherkinExamples}
+            onChange={(value) => set("gherkinExamples", value as MigrationOptions["gherkinExamples"])}
+          >
+            <Stack gap={6} mt="xs">
+              <Radio value="attachment" label="A Markdown file of the Examples step" description="The table stays one table, attached to the step that says Examples." />
+              <Radio
+                value="examples"
+                label="Examples of the test case"
+                description="Every row becomes an example with the column titles as parameter names; the Examples step is left out of the scenario."
+              />
+            </Stack>
+          </Radio.Group>
           {testrail && (
           <Switch
             label="Add suite and section descriptions to the case description"

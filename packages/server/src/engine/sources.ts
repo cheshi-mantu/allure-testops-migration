@@ -1,4 +1,4 @@
-import type { PlannedCase, Profile } from "@atm/shared";
+import { normalizePlanned, type PlannedCase, type Profile } from "@atm/shared";
 import { groupCases, type CsvCase } from "../csv/cases.js";
 import { detectPathSeparator, loadCsv } from "../csv/discovery.js";
 import { transformCsvCase } from "../csv/transform.js";
@@ -55,6 +55,19 @@ export interface SourceDeps {
 }
 
 export async function prepareSource(profile: Profile, deps: SourceDeps, log: Log, onRetry?: (info: RetryInfo) => void): Promise<PreparedSource> {
+  const prepared = await readySource(profile, deps, log, onRetry);
+  // Whatever the source, values are written trimmed, and tags, layers and statuses in lower case.
+  const transform = prepared.transform.bind(prepared);
+  return {
+    ...prepared,
+    transform: (testCase) => {
+      const result = transform(testCase);
+      return { ...result, planned: normalizePlanned(result.planned) };
+    },
+  };
+}
+
+function readySource(profile: Profile, deps: SourceDeps, log: Log, onRetry?: (info: RetryInfo) => void): Promise<PreparedSource> {
   switch (profile.source) {
     case "csv":
       return prepareCsv(profile, deps, log);

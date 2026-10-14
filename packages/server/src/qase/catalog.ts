@@ -1,4 +1,4 @@
-import type { FieldTarget, SourceFieldInfo, SourceFieldKind, TestRailFieldOption } from "@atm/shared";
+import { exampleText, type FieldTarget, type SourceFieldInfo, type SourceFieldKind, type TestRailFieldOption } from "@atm/shared";
 import type { QaseAuthor, QaseCase, QaseCustomField, QaseMilestone, QaseParameter, QaseSystemField, QaseUser } from "./types.js";
 
 /** Values of a field on one case. */
@@ -101,6 +101,41 @@ function parseOptions(field: QaseCustomField): Map<string, string> {
   }
 }
 
+/** Most examples a case gets from its parameters; more combinations stay as text. */
+export const MAX_EXAMPLES = 100;
+
+/**
+ * Parameters of a case as the examples Qase runs: every combination of the values of single
+ * parameters, while the parameters of a group change together, row by row.
+ */
+export function parameterExamples(parameters: QaseParameter[] | undefined): { name: string; value: string }[][] {
+  const dimensions: { name: string; value: string }[][][] = [];
+  for (const parameter of parameters ?? []) {
+    if (parameter.type === "single" && parameter.item?.values.length) {
+      dimensions.push(parameter.item.values.map((value) => [{ name: parameter.item.title, value }]));
+    } else if (parameter.type === "group" && parameter.items?.length) {
+      const rows = Math.max(...parameter.items.map((item) => item.values.length));
+      dimensions.push(Array.from({ length: rows }, (_unused, row) => parameter.items.map((item) => ({ name: item.title, value: item.values[row] ?? "" }))));
+    }
+  }
+  if (dimensions.length === 0) {
+    return [];
+  }
+  return dimensions.reduce<{ name: string; value: string }[][]>((combinations, dimension) => combinations.flatMap((combination) => dimension.map((values) => [...combination, ...values])), [[]]);
+}
+
+/** How many examples the parameters give, without building them. */
+export function parameterExampleCount(parameters: QaseParameter[] | undefined): number {
+  let count = 0;
+  for (const parameter of parameters ?? []) {
+    const size = parameter.type === "single" ? (parameter.item?.values.length ?? 0) : parameter.type === "group" ? Math.max(0, ...(parameter.items ?? []).map((item) => item.values.length)) : 0;
+    if (size > 0) {
+      count = (count || 1) * size;
+    }
+  }
+  return count;
+}
+
 /** Parameters of a case as Markdown: a line per parameter, a table per group of parameters. */
 export function parametersText(parameters: QaseParameter[] | undefined): string {
   const blocks: string[] = [];
@@ -145,7 +180,7 @@ export class QaseCatalog {
       { systemName: "qase:preconditions", label: "Pre-conditions", kind: "text", system: true, closed: false, suggested: { kind: "precondition", heading: "" } },
       { systemName: "qase:postconditions", label: "Post-conditions", kind: "text", system: true, closed: false, suggested: { kind: "description", heading: "Post-conditions" } },
       { systemName: "qase:steps", label: "Steps", kind: "steps", system: true, closed: false, suggested: { kind: "scenario" }, always: true },
-      { systemName: "qase:parameters", label: "Parameters", kind: "text", system: true, closed: false, suggested: { kind: "description", heading: "Parameters" } },
+      { systemName: "qase:parameters", label: "Parameters", kind: "text", system: true, closed: false, suggested: { kind: "examples" } },
     ];
     for (const known of ENUMS) {
       const options = new Map((data.systemFields.find((field) => field.slug === known.slug)?.options ?? []).map((option) => [String(option.id), option]));
@@ -316,12 +351,7 @@ export class QaseCatalog {
             counts.set(id, entry);
           });
         } else if (examples.length < 3) {
-          const example = value.labels
-            .join(", ")
-            .replace(/!\[([^\]]*)\]\([^)]*\)/g, (_m, name: string) => `[image${name ? `: ${name}` : ""}]`)
-            .replace(/\s+/g, " ")
-            .trim()
-            .slice(0, 160);
+          const example = exampleText(value.labels.join(", "));
           if (example && !examples.includes(example)) {
             examples.push(example);
           }

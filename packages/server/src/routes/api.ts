@@ -4,6 +4,7 @@ import { z } from "zod";
 import {
   maskSecrets,
   newProfile,
+  normalizePlanned,
   PROFILE_FORMAT_VERSION,
   ProfileSchema,
   restoreSecrets,
@@ -313,7 +314,7 @@ export async function registerApi(app: FastifyInstance, deps: ApiDeps): Promise<
       }
       try {
         const { planned, linkedCaseIds } = source.transform(testCase);
-        return { ...planned, linkedCaseIds };
+        return { ...normalizePlanned(planned), linkedCaseIds };
       } catch (error) {
         throw error instanceof CaseSkipped ? Object.assign(error, { statusCode: 422 }) : error;
       }
@@ -327,7 +328,7 @@ export async function registerApi(app: FastifyInstance, deps: ApiDeps): Promise<
       }
       context.assets.learn([testCase]);
       const { planned, linkedCaseIds } = transformQaseCase(testCase, context);
-      return { ...planned, linkedCaseIds };
+      return { ...normalizePlanned(planned), linkedCaseIds };
     }
     if (profile.source === "xray") {
       const context = await loadXrayContext(profile);
@@ -346,7 +347,7 @@ export async function registerApi(app: FastifyInstance, deps: ApiDeps): Promise<
           fix: { step: "scope" },
         });
       }
-      return { ...planned, linkedCaseIds };
+      return { ...normalizePlanned(planned), linkedCaseIds };
     }
     const caseId = Number(rawId.replace(/^C/i, ""));
     if (!Number.isInteger(caseId) || caseId <= 0) {
@@ -375,7 +376,7 @@ export async function registerApi(app: FastifyInstance, deps: ApiDeps): Promise<
         step.name = await context.client.getSharedStep(step.sourceId).then((s) => s.title).catch(() => `Shared step ${step.sourceId}`);
       }
     }
-    return { ...planned, linkedCaseIds };
+    return { ...normalizePlanned(planned), linkedCaseIds };
   });
 
   // ------------------------------------------------------------ runs

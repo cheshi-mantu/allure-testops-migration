@@ -636,6 +636,7 @@ function describePlan(planned: PlannedCase): string {
   if (fieldValues) parts.push(`${fieldValues} custom field value(s)`);
   if (planned.tags.length > 1) parts.push(`${planned.tags.length - 1} tag(s)`);
   if (planned.issues.length) parts.push(`${planned.issues.length} issue(s)`);
+  if (planned.examples?.length) parts.push(`${planned.examples.length} example(s)`);
   if (planned.testKeys?.length) parts.push(`test key ${planned.testKeys.map((k) => k.key).join(", ")}`);
   if (planned.links.length) parts.push(`${planned.links.length} link(s)`);
   if (planned.owner) parts.push(`owner ${planned.owner}`);

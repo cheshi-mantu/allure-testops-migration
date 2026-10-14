@@ -60,6 +60,9 @@ function targetsOf(field: TestRailFieldInfo): FieldTarget["kind"][] {
     case "steps":
       return ["scenario", "ignore"];
     case "text":
+      if (field.systemName === "qase:parameters") {
+        return ["examples", "description", "comment", "ignore"];
+      }
       if (field.systemName === "xray:preconditions") {
         return ["precondition", "description", "comment", "customField", "tag", "ignore"];
       }

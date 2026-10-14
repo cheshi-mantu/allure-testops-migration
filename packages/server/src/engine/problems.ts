@@ -65,6 +65,7 @@ export type Operation =
   | "set test keys"
   | "set members"
   | "add comments"
+  | "set the examples"
   | "upload attachments"
   | "set the scenario"
   | "migrate a shared step"

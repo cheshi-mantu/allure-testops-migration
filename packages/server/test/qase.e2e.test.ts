@@ -10,6 +10,7 @@ import { discoverQase } from "../src/qase/discovery.js";
 import { checkQase } from "../src/routes/checks.js";
 import { FileStore } from "../src/storage/fileStore.js";
 import { RunStore } from "../src/storage/runs.js";
+import { TestOpsClient } from "../src/testops/client.js";
 import { discoverTestOps } from "../src/testops/discovery.js";
 
 describe("Qase to Allure TestOps migration", () => {
@@ -61,7 +62,7 @@ describe("Qase to Allure TestOps migration", () => {
     return (await store.get(p.id, started.id))!;
   }
 
-  const byTag = (tag: string) => state.testCases.find((tc) => tc.tags.includes(tag))!;
+  const byTag = (tag: string) => state.testCases.find((tc) => tc.tags.includes(tag.toLowerCase()))!;
   const cf = (tc: { cfv: { name: string; customField: { id: number } }[] }, name: string) =>
     tc.cfv.filter((v) => state.customFields.find((f) => f.id === v.customField.id)?.name === name).map((v) => v.name);
 
@@ -84,7 +85,7 @@ describe("Qase to Allure TestOps migration", () => {
       "Pre-conditions": { kind: "precondition", heading: "" },
       "Post-conditions": { kind: "description", heading: "Post-conditions" },
       Steps: { kind: "scenario" },
-      Parameters: { kind: "description", heading: "Parameters" },
+      Parameters: { kind: "examples" },
       Severity: { kind: "customField", name: "Severity" },
       Layer: { kind: "layer" },
       Status: { kind: "status" },
@@ -133,8 +134,8 @@ describe("Qase to Allure TestOps migration", () => {
     expect(reset.precondition).toBe("The user `jane@example.com` exists.");
     expect(reset.description).toContain("Checks the **reset** flow.");
     expect(reset.description).toContain("### Post-conditions\n\nRemove the reset token.");
-    expect(reset.description).toContain("- **browser**: chrome, firefox");
-    expect(reset.description).toContain("| admin | en |");
+    // Parameters: two browsers times a group of two rows.
+    expect(reset.examples.map((e) => e.parameters.map((p) => p.value).join("/"))).toEqual(["chrome/admin/en", "chrome/guest/de", "firefox/admin/en", "firefox/guest/de"]);
     expect(reset.description).toContain("### Notes\n\nReview after the **redesign**.");
     expect(reset.links).toEqual(expect.arrayContaining([expect.objectContaining({ name: "Qase DEMO-1", url: "https://app.qase.io/case/DEMO-1" }), expect.objectContaining({ url: "https://docs.example.com/specs/auth" })]));
     // Files of the case, of a step and the image inside the description.
@@ -155,7 +156,11 @@ describe("Qase to Allure TestOps migration", () => {
     expect(JSON.stringify(reset.scenario[2])).toContain("No validation error");
 
     const gherkin = byTag("qase:DEMO-2");
-    expect(gherkin.scenario.map((s) => s.data.body).slice(0, 3)).toEqual(["Given I am on the sign-up page", 'When I enter the password "<password>"', 'Then I see "<message>"']);
+    expect(gherkin.scenario.map((s) => s.data.body)).toEqual(["Given I am on the sign-up page", 'When I enter the password "<password>"', 'Then I see "<message>"', "Examples:"]);
+    // The table of Examples is a Markdown file of its step.
+    expect(gherkin.attachments.map((a) => a.name)).toEqual(["examples.md"]);
+    expect(JSON.stringify(gherkin.scenario[3])).toContain('"type":"attachment"');
+    expect(gherkin.examples).toEqual([]);
     expect(cf(gherkin, "Automation")).toEqual(["Automated"]);
     expect(cf(gherkin, "Priority")).toEqual([]);
 
@@ -181,6 +186,32 @@ describe("Qase to Allure TestOps migration", () => {
     const summary = await run(byCase);
     expect(summary.counters).toMatchObject({ total: 1, created: 1 });
     expect(byTag("single:DEMO-5").name).toBe("Orders API returns the list");
+  });
+
+  it("turns tables of Gherkin Examples into examples of the case when asked", async () => {
+    const p = await mapped(profile("outline"));
+    p.options.gherkinExamples = "examples";
+    p.qase.scope.caseIds = [2];
+    await run(p);
+    const gherkin = byTag("outline:DEMO-2");
+    expect(gherkin.scenario.map((s) => s.data.body)).toEqual(["Given I am on the sign-up page", 'When I enter the password "<password>"', 'Then I see "<message>"']);
+    expect(gherkin.examples.map((e) => e.parameters)).toEqual([[{ name: "password", value: "short" }, { name: "message", value: "At least 8 characters" }]]);
+    expect(gherkin.attachments).toEqual([]);
+  });
+
+  it("writes tags in lower case and still finds a case tagged as the source spells it", async () => {
+    const p = await mapped(profile("Old"));
+    p.qase.scope.caseIds = [3];
+    p.options.additionalTag = "From-Qase";
+    // A case migrated before tags were lower case.
+    const client = new TestOpsClient(p.testops.connection);
+    const old = await client.createTestCase(1, "Session expires after 30 minutes");
+    await client.setTags(old.id, ["Old:DEMO-3"]);
+
+    const summary = await run(p);
+    expect(summary.counters).toMatchObject({ created: 0, updated: 1, failed: 0 });
+    const updated = state.testCases.find((tc) => tc.id === old.id)!;
+    expect(updated.tags).toEqual(["old:demo-3", "from-qase"]);
   });
 
   it("copies the steps of shared steps into the cases when shared steps are off", async () => {

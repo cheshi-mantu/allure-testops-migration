@@ -254,6 +254,8 @@ export const FieldTargetSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("link") }),
   /** XML: addresses of files to attach to the case; they stay links when files are not downloaded. */
   z.object({ kind: z.literal("attachment") }),
+  /** Sets of parameter values that become examples of the test case, e.g. Qase parameters. */
+  z.object({ kind: z.literal("examples") }),
   z.object({ kind: z.literal("issue"), integrationId: z.number().int().positive().nullable().default(null) }),
   z.object({
     kind: z.enum(TEXT_TARGETS),
@@ -304,6 +306,8 @@ export const MigrationOptionsSchema = z.object({
   parentDescriptions: z.boolean().default(false),
   /** How a plain text steps field becomes a scenario. */
   textSteps: z.enum(["lines", "single"]).default("lines"),
+  /** Tables of Gherkin Examples: a Markdown file of the "Examples" step, or examples of the test case. */
+  gherkinExamples: z.enum(["attachment", "examples"]).default("attachment"),
   migrateAttachments: z.boolean().default(true),
   migrateSharedSteps: z.boolean().default(true),
   /** Migrate cases that were deleted in TestRail (only available for TestRail versions that expose them). */

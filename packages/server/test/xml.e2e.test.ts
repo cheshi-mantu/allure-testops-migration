@@ -58,7 +58,7 @@ describe("XML to Allure TestOps migration", () => {
     return (await store.get(profile.id, started.id))!;
   }
 
-  const byTag = (tag: string) => state.testCases.find((tc) => tc.tags.includes(tag))!;
+  const byTag = (tag: string) => state.testCases.find((tc) => tc.tags.includes(tag.toLowerCase()))!;
   const cf = (tc: { cfv: { name: string; customField: { id: number } }[] }, name: string) =>
     tc.cfv.filter((v) => state.customFields.find((f) => f.id === v.customField.id)?.name === name).map((v) => v.name);
 

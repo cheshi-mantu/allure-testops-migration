@@ -1,11 +1,12 @@
 import type { FieldMapping, PlannedCase, PlannedNote, PlannedStep, Profile, TextTarget } from "@atm/shared";
-import { mapSectionPath } from "@atm/shared";
+import { mapSectionPath, splitValue } from "@atm/shared";
 import { ATTACHMENT_SCHEME, convertText, type TextOptions } from "../convert/markup.js";
+import { examplesSink } from "../convert/examples.js";
 import { note } from "../convert/notes.js";
 import { buildStep, inlineAttachment, textSteps } from "../convert/steps.js";
 import { migrationTag } from "../convert/transform.js";
 import type { QaseAssets } from "./assets.js";
-import type { QaseCatalog } from "./catalog.js";
+import { MAX_EXAMPLES, parameterExampleCount, parameterExamples, parametersText, type QaseCatalog } from "./catalog.js";
 import type { QaseCase, QaseStep, QaseSuite } from "./types.js";
 
 export interface QaseContext {
@@ -76,7 +77,7 @@ export function mappedQaseValues(testCase: QaseCase, mapping: FieldMapping, cata
     return result;
   }
   for (const label of value.labels) {
-    for (const part of mapping.separator ? label.split(mapping.separator) : [label]) {
+    for (const part of splitValue(label, mapping.separator)) {
       const key = part.trim();
       push(Object.hasOwn(mapping.values, key) ? mapping.values[key] : key);
     }
@@ -171,6 +172,7 @@ export function transformQaseCase(testCase: QaseCase, context: QaseContext): { p
     planned.customFields[name] = [...existing, ...values.filter((v) => !existing.includes(v))];
   };
   const inlineIds = new Set<string>();
+  const examples = examplesSink(options.gherkinExamples);
   /** Qase text to Markdown; images kept by Qase are planned as attachments. */
   const text = (raw: string): string => {
     const converted = convertText(withQaseImages(raw, assets), textOptions);
@@ -199,6 +201,23 @@ export function transformQaseCase(testCase: QaseCase, context: QaseContext): { p
       case "scenarioExpected":
       case "attachment":
         break;
+      case "examples": {
+        const count = parameterExampleCount(testCase.parameters);
+        if (count > MAX_EXAMPLES) {
+          // Too many combinations to run one by one: they stay readable as text.
+          texts.description.push(`### ${label}\n\n${parametersText(testCase.parameters)}`);
+          notes.push({
+            code: "qase-too-many-examples",
+            text: `The parameters of this case give ${count} combinations; they are in the description instead of the examples.`,
+            summary: `Cases whose parameters give more than ${MAX_EXAMPLES} combinations keep them in the description.`,
+            hint: "Allure TestOps runs a case once per example. Split the parameters in Qase, or map Parameters to the description on the Fields step.",
+            fix: { step: "fields", field: mapping.source },
+          });
+        } else {
+          examples.examples.push(...parameterExamples(testCase.parameters));
+        }
+        break;
+      }
       case "customField":
         addCustomField(target.name, values());
         break;
@@ -280,11 +299,11 @@ export function transformQaseCase(testCase: QaseCase, context: QaseContext): { p
           steps =
             testCase.steps_type === "gherkin"
               ? // A Gherkin case keeps its whole scenario as text: a step per line, tables stay with their line.
-                textSteps((testCase.steps ?? []).map((step) => step.action ?? "").join("\n"), "lines", { format: "markdown" })
+                textSteps((testCase.steps ?? []).map((step) => step.action ?? "").join("\n"), "lines", { format: "markdown" }, examples)
               : qaseSteps(testCase.steps ?? [], context, options.migrateSharedSteps, textOptions);
         } else {
           const raw = catalog.text(testCase, mapping.source);
-          steps = raw ? textSteps(withQaseImages(raw, assets), options.textSteps, textOptions) : [];
+          steps = raw ? textSteps(withQaseImages(raw, assets), options.textSteps, textOptions, examples) : [];
         }
         if (steps.length === 0) {
           break;
@@ -311,6 +330,9 @@ export function transformQaseCase(testCase: QaseCase, context: QaseContext): { p
     }
   }
 
+  if (examples.examples.length > 0) {
+    planned.examples = examples.examples;
+  }
   if ((testCase.steps?.length ?? 0) > 0 && !profile.fields.some((m) => m.source === "qase:steps" && m.target.kind !== "ignore")) {
     notes.push({
       code: "qase-steps-not-mapped",
