@@ -53,6 +53,7 @@ packages/
   server/src/testops/       Allure TestOps client and project discovery
   server/src/testrail/      TestRail client, discovery, field and section handling
   server/src/xray/          Xray Cloud (GraphQL) and Jira Cloud (REST v3) clients, field catalog, wiki markup, transform, discovery
+  server/src/qase/          Qase REST v1 client paced for the workspace rate limit, field catalog, transform, files and shared steps, discovery
   server/src/csv/           CSV reading, column suggestions, grouping rows into cases, step parsing, transform
   server/src/xml/           generic XML reading (read.ts) and the XML source on top of the CSV table model (source.ts)
   server/src/convert/       TestRail case to PlannedCase (pure), text and markup conversion
@@ -212,4 +213,5 @@ The XML source is generic on purpose: there are no presets per tool. `xml/read.t
 - `createTestOpsMock()` from `@atm/mocks` serves the subset of the Allure TestOps API listed above and keeps its state in memory (`state.testCases`, `state.customFields`, ...). Options: `latencyMs`, `rejectedCustomFieldValues` (400 for these values), `failures` (answer matching requests with 500 or with an HTML page a given number of times).
 - An end-to-end test for a source should: migrate a synthetic project, check the written cases field by field, run again and expect only updates, and run once with injected failures expecting no duplicates.
 - `createXrayMock()` serves Jira Cloud REST v3 and the Xray Cloud GraphQL API on one port, with a project of Manual, Cucumber and Generic tests, a called test, folders, preconditions, sets, plans, comments, links and attachments. Search pages hold two issues, so paging is always exercised.
-- Test the UI against the fake servers (`npm run dev:mocks` and `npm run dev:server`): fake TestRail user `demo@example.com` with API key `demo-api-key`, fake Allure TestOps token `demo-api-token`, fake Jira and Xray on port 4003 (`demo@example.com` / `demo-jira-token`, Xray `demo-client-id` / `demo-client-secret`).
+- Test the UI against the fake servers (`npm run dev:mocks` and `npm run dev:server`): fake TestRail user `demo@example.com` with API key `demo-api-key`, fake Allure TestOps token `demo-api-token`, fake Jira and Xray on port 4003 (`demo@example.com` / `demo-jira-token`, Xray `demo-client-id` / `demo-client-secret`). Fake Qase on port 4004 with the token `demo-qase-token`.
+- `createQaseMock()` serves the Qase REST API v1 the migration and `dev/qase-seed.ts` use, reads and writes, with a project DEMO (suites three levels deep, classic and Gherkin cases, a shared step, nested steps, parameters, custom fields, files served from another origin than the API). Options: `pageSize` (small values exercise paging) and `rateLimit` (429 with Retry-After).

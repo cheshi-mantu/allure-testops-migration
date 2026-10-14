@@ -62,8 +62,8 @@ export interface SourceFieldInfo {
   suggestedTarget?: import("./profile.js").FieldTarget;
   /** Separator the values seem to use, e.g. a comma in "smoke, ui". */
   suggestedSeparator?: string;
-  /** Translation of values the source stores as codes, e.g. `1` for "Manual". */
-  suggestedValues?: Record<string, string>;
+  /** Translation of values the source stores as codes, e.g. `1` for "Manual"; null skips the value. */
+  suggestedValues?: Record<string, string | null>;
 }
 
 export interface SectionLevelInfo {
@@ -86,7 +86,7 @@ export interface SuiteStructure {
 
 /** What the mapping screens show about the source: structure, fields and sample cases. */
 export interface SourceDiscovery {
-  source: "testrail" | "csv" | "xray" | "xml";
+  source: "testrail" | "csv" | "xray" | "xml" | "qase";
   project: NamedId & { suiteMode: number };
   suites: NamedId[];
   structure: SuiteStructure[];
@@ -342,13 +342,15 @@ export interface RunLogEntry {
 export interface ProfileListItem {
   id: string;
   name: string;
-  source: "testrail" | "csv" | "xray" | "xml";
+  source: "testrail" | "csv" | "xray" | "xml" | "qase";
   /** CSV and XML: name of the chosen file. */
   fileName: string | null;
   updatedAt: string;
   testrailEndpoint: string;
   /** Xray: Jira project key. */
   xrayProject?: string;
+  /** Qase: project code. */
+  qaseProject?: string;
   testopsEndpoint: string;
   lastRun: RunSummary | null;
 }

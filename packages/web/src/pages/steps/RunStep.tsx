@@ -38,6 +38,9 @@ function otherSettings(run: RunSummary, profile: Profile, currentFileName: strin
         if (isFileSource(profile.source)) {
           return `File "${context.sourceLabel}", the profile now uses ${currentFileName ? `"${currentFileName}"` : "another file"}.`;
         }
+        if (profile.source === "qase") {
+          return `${context.sourceLabel}, the profile now uses Qase project ${profile.qase.scope.projectCode || "?"}.`;
+        }
         if (profile.source === "xray") {
           const jql = profile.xray.scope.jql.trim();
           return `${context.sourceLabel}, the profile now uses Xray project ${profile.xray.scope.projectKey || "?"}${jql ? ` (${jql})` : ""}.`;
@@ -83,6 +86,18 @@ function problems(profile: Profile): string[] {
     const names = profile.fields.filter((m) => m.target.kind === "name").length;
     if (names !== 1) {
       list.push("Map exactly one field to the test case name (Fields).");
+    }
+    return list;
+  }
+  if (profile.source === "qase") {
+    if (!has(profile.qase.connection.apiToken)) {
+      list.push("The Qase connection is incomplete (Connections).");
+    }
+    if (!profile.qase.scope.projectCode || !profile.testops.scope.projectId) {
+      list.push("Choose both projects (Projects).");
+    }
+    if (profile.fields.length === 0) {
+      list.push("Review the field mapping (Fields).");
     }
     return list;
   }
@@ -389,7 +404,7 @@ export function RunStep() {
           <Text size="sm">
             Test cases and custom fields{profile.source === "xml" && profile.xml.files.download ? " and attachments" : isFileSource(profile.source) ? "" : ", shared steps and attachments"} will be created or updated in
             Allure TestOps project #{profile.testops.scope.projectId}.{" "}
-            {profile.source === "testrail" ? "TestRail is only read." : profile.source === "xray" ? "Jira and Xray are only read." : "The file is not changed."}
+            {profile.source === "testrail" ? "TestRail is only read." : profile.source === "xray" ? "Jira and Xray are only read." : profile.source === "qase" ? "Qase is only read." : "The file is not changed."}
           </Text>
           <Group justify="flex-end">
             <Button variant="default" onClick={() => setConfirm(false)}>
@@ -420,6 +435,7 @@ function RunDetails({ profile, run, other }: { profile: Profile; run: RunSummary
   const percent = counters.total ? Math.round((counters.processed / counters.total) * 100) : summary.status === "running" ? 0 : 100;
   const testrailBase = profile.testrail.connection.endpoint.replace(/\/?$/, "/");
   const jiraBase = profile.xray.connection.jiraUrl.replace(/\/?$/, "/");
+  const qaseBase = (profile.qase.connection.appUrl.trim() || "https://app.qase.io").replace(/\/?$/, "/");
   const testopsBase = profile.testops.connection.endpoint.replace(/\/?$/, "/");
   // Links point to the project the run wrote to, which may not be the one chosen now.
   const testopsProjectId = summary.context ? summary.context.testopsProjectId : profile.testops.scope.projectId;
@@ -547,6 +563,10 @@ function RunDetails({ profile, run, other }: { profile: Profile; run: RunSummary
                   (profile.source === "testrail" ? (
                     <Anchor href={`${testrailBase}index.php?/cases/view/${entry.caseId}`} target="_blank" size="xs" className="mono">
                       C{entry.caseId}
+                    </Anchor>
+                  ) : profile.source === "qase" && /^[A-Z0-9_]+-\d+$/.test(entry.caseId) ? (
+                    <Anchor href={`${qaseBase}case/${entry.caseId}`} target="_blank" size="xs" className="mono">
+                      {entry.caseId}
                     </Anchor>
                   ) : profile.source === "xray" && /^[A-Z][A-Z0-9_]*-\d+$/.test(entry.caseId) ? (
                     <Anchor href={`${jiraBase}browse/${entry.caseId}`} target="_blank" size="xs" className="mono">

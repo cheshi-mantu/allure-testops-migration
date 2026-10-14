@@ -190,6 +190,7 @@ function FieldsEditor() {
   const unit = xml ? "field" : "column";
   const nameColumns = profile.fields.filter((m) => m.target.kind === "name").map((m) => m.source);
   const xray = profile.source === "xray";
+  const qase = profile.source === "qase";
   const longText = (f: TestRailFieldInfo) => ["text", "steps", "url"].includes(f.kind);
   const groups: { title: string; hint: string; fields: TestRailFieldInfo[] }[] = csv
     ? [
@@ -237,7 +238,7 @@ function FieldsEditor() {
     },
     {
       title: "Fields with a list of values",
-      hint: "Each value can be renamed or skipped. Values not listed in the mapping keep their TestRail name.",
+      hint: `Each value can be renamed or skipped. Values not listed in the mapping keep their ${qase ? "Qase" : "TestRail"} name.`,
       fields: visible.filter((f) => f.options !== null && !longText(f)),
     },
     {
@@ -256,7 +257,9 @@ function FieldsEditor() {
             ? `Choose where each ${unit} goes. Examples and counts come from all ${discovery.sampledCases} case(s) of the file.`
             : xray
               ? `Choose where each attribute of the Xray tests goes: Xray details and every Jira field used by the tests. Examples and counts come from ${discovery.sampledCases} sampled test(s).`
-              : `Choose where each TestRail field goes. Examples and counts come from ${discovery.sampledCases} sampled case(s) of the selected suites.`}
+              : qase
+                ? `Choose where each attribute of the Qase cases goes: system fields, tags, parameters and the custom fields of the project. Examples and counts come from ${discovery.sampledCases} sampled case(s).`
+                : `Choose where each TestRail field goes. Examples and counts come from ${discovery.sampledCases} sampled case(s) of the selected suites.`}
         </Text>
         <RefreshButton />
       </Group>
@@ -360,7 +363,7 @@ function FieldRow({
               </Tooltip>
             )}
             {!field.system && field.kind !== "column" && !xml && (
-              <Tooltip label={profile.source === "xray" ? "Custom field in Jira" : "Custom field in TestRail"}>
+              <Tooltip label={profile.source === "xray" ? "Custom field in Jira" : profile.source === "qase" ? "Custom field in Qase" : "Custom field in TestRail"}>
                 <Badge size="xs" variant="dot" color="gray">
                   custom
                 </Badge>
@@ -621,7 +624,7 @@ function ValueTable({
     <Table mt="sm" verticalSpacing={4}>
       <Table.Thead>
         <Table.Tr>
-          <Table.Th>{profile.source === "csv" ? "CSV value" : profile.source === "xml" ? "Value in the file" : profile.source === "xray" ? "Jira or Xray value" : "TestRail value"}</Table.Th>
+          <Table.Th>{profile.source === "csv" ? "CSV value" : profile.source === "xml" ? "Value in the file" : profile.source === "xray" ? "Jira or Xray value" : profile.source === "qase" ? "Qase value" : "TestRail value"}</Table.Th>
           <Table.Th w={90}>In sample</Table.Th>
           <Table.Th w="45%">Allure TestOps value</Table.Th>
           <Table.Th w={90}>Skip</Table.Th>

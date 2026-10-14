@@ -14,6 +14,8 @@ export interface CaseAttachments {
 export interface SharedStepContent {
   id: number;
   title: string;
+  /** Name of the Allure TestOps shared step, the same on every run; "<title> [<id>]" when not set. */
+  name?: string;
   steps: PlannedStep[];
 }
 

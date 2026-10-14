@@ -7,12 +7,12 @@ import { ApiError, errorText } from "../api/client";
 import { useProfile } from "./ProfileContext";
 
 const STEP_LABELS: Record<FixLink["step"], Record<Profile["source"], string>> = {
-  connections: { testrail: "Connections", csv: "Connection", xray: "Connections", xml: "Connection" },
-  file: { testrail: "CSV file", csv: "CSV file", xray: "CSV file", xml: "XML file" },
-  scope: { testrail: "Projects", csv: "Project", xray: "Projects", xml: "Project" },
-  structure: { testrail: "Suites & sections", csv: "Sections", xray: "Folders", xml: "Sections" },
-  fields: { testrail: "Fields", csv: "Columns", xray: "Fields", xml: "Fields" },
-  options: { testrail: "Options", csv: "Options", xray: "Options", xml: "Options" },
+  connections: { testrail: "Connections", csv: "Connection", xray: "Connections", xml: "Connection", qase: "Connections" },
+  file: { testrail: "CSV file", csv: "CSV file", xray: "CSV file", xml: "XML file", qase: "CSV file" },
+  scope: { testrail: "Projects", csv: "Project", xray: "Projects", xml: "Project", qase: "Projects" },
+  structure: { testrail: "Suites & sections", csv: "Sections", xray: "Folders", xml: "Sections", qase: "Suites" },
+  fields: { testrail: "Fields", csv: "Columns", xray: "Fields", xml: "Fields", qase: "Fields" },
+  options: { testrail: "Options", csv: "Options", xray: "Options", xml: "Options", qase: "Options" },
 };
 
 /** "Fields: Priority": the step and, when known, the field label instead of its system name. */

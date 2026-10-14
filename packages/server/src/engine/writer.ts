@@ -453,7 +453,7 @@ export class TestOpsWriter {
   private async migrateSharedStep(sourceId: number, log: WriteLog): Promise<number> {
     const shared = await this.assets.sharedStep(sourceId);
     // Same naming as the previous migration tool, so earlier migrated shared steps are reused.
-    const name = `${shared.title} [${shared.id}]`;
+    const name = shared.name ?? `${shared.title} [${shared.id}]`;
     const target = (await this.testops.findSharedStep(this.projectId, name)) ?? (await this.testops.createSharedStep(this.projectId, name));
     const planned = shared.steps;
     const uploader: Uploader = {

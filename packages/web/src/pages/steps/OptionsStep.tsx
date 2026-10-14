@@ -19,6 +19,7 @@ export function OptionsStep() {
   const csv = isFileSource(profile.source);
   const xml = profile.source === "xml";
   const xray = profile.source === "xray";
+  const qase = profile.source === "qase";
   const testrail = profile.source === "testrail";
   const prefixMissing = options.migrationTagPrefix.trim() === "";
   const prefixShown = prefixMissing ? "<prefix>" : options.migrationTagPrefix;
@@ -35,25 +36,27 @@ export function OptionsStep() {
             description={
               csv
                 ? `Every case gets the tag "${prefixShown}:<case id>". Reruns find cases by this tag and update them.`
-                : xray
+                : qase
+                  ? `Every case gets the tag "${prefixShown}:<project code>-<case id>", e.g. "${prefixShown}:DEMO-12". Reruns find cases by this tag and update them.`
+                  : xray
                   ? `Every case gets the tag "${prefixShown}:<issue key>", e.g. "${prefixShown}:CALC-12". Reruns find cases by this tag and update them.`
                   : `Every case gets the tag "${prefixShown}:<TestRail id>". Reruns find cases by this tag and update them. Keep "testrail" to continue a migration made with the previous migration tool.`
             }
-            placeholder={xml ? "e.g. xml-regression" : csv ? "e.g. csv-regression" : xray ? "xray" : "testrail"}
+            placeholder={xml ? "e.g. xml-regression" : csv ? "e.g. csv-regression" : xray ? "xray" : qase ? "qase" : "testrail"}
             value={options.migrationTagPrefix}
             error={prefixMissing ? "Enter a prefix. Without it migrated cases cannot be found again, so the migration cannot start." : undefined}
             onChange={(e) => set("migrationTagPrefix", e.currentTarget.value.trim())}
           />
           <TextInput
             label="Additional tag"
-            description={`Optional tag added to every migrated case, e.g. “from-${xray ? "xray" : xml ? "xml" : csv ? "csv" : "testrail"}”.`}
+            description={`Optional tag added to every migrated case, e.g. “from-${xray ? "xray" : qase ? "qase" : xml ? "xml" : csv ? "csv" : "testrail"}”.`}
             value={options.additionalTag}
             onChange={(e) => set("additionalTag", e.currentTarget.value)}
           />
           {!csv && (
           <Switch
-            label={xray ? "Link back to the Jira issue" : "Link back to the TestRail case"}
-            description={xray ? "A link named after the issue key, e.g. \"Jira CALC-12\", in the Links of the case." : undefined}
+            label={xray ? "Link back to the Jira issue" : qase ? "Link back to the Qase case" : "Link back to the TestRail case"}
+            description={xray ? "A link named after the issue key, e.g. \"Jira CALC-12\", in the Links of the case." : qase ? "A link named after the case, e.g. \"Qase DEMO-12\", in the Links of the case." : undefined}
             checked={options.selfLink}
             onChange={(e) => set("selfLink", e.currentTarget.checked)}
           />
@@ -90,8 +93,8 @@ export function OptionsStep() {
           <Title order={4}>Text</Title>
           {!xray && (
           <Radio.Group
-            label={csv ? "Text format" : "TestRail text format"}
-            description={xml ? "Text in the file may be Markdown or HTML." : csv ? "Text cells may hold Markdown or HTML." : "Newer TestRail versions store HTML; older ones use Markdown."}
+            label={csv ? "Text format" : qase ? "Qase text format" : "TestRail text format"}
+            description={xml ? "Text in the file may be Markdown or HTML." : csv ? "Text cells may hold Markdown or HTML." : qase ? "Qase keeps text as Markdown; text written in an older editor may be HTML." : "Newer TestRail versions store HTML; older ones use Markdown."}
             value={options.textFormat}
             onChange={(value) => set("textFormat", value as MigrationOptions["textFormat"])}
           >
@@ -135,7 +138,7 @@ export function OptionsStep() {
           <Title order={4}>Content</Title>
           <Switch
             label="Migrate attachments"
-            description={xray ? "Attachments of the Jira issue, images inside its text and files of Xray steps." : "Case attachments and images inside text and steps."}
+            description={xray ? "Attachments of the Jira issue, images inside its text and files of Xray steps." : qase ? "Files of the cases and of their steps, and images inside text that Qase keeps." : "Case attachments and images inside text and steps."}
             checked={options.migrateAttachments}
             onChange={(e) => set("migrateAttachments", e.currentTarget.checked)}
           />
@@ -144,7 +147,7 @@ export function OptionsStep() {
             description={
               xray
                 ? "A step that calls another test becomes an Allure TestOps shared step with the called test's steps. When off, those steps are copied into each case."
-                : "TestRail shared steps become Allure TestOps shared steps. When off, their steps are copied into each case."
+                : `${qase ? "Qase" : "TestRail"} shared steps become Allure TestOps shared steps. When off, their steps are copied into each case.`
             }
             checked={options.migrateSharedSteps}
             onChange={(e) => set("migrateSharedSteps", e.currentTarget.checked)}
@@ -169,7 +172,9 @@ export function OptionsStep() {
             description={
               csv
                 ? "Higher is faster but puts more load on Allure TestOps."
-                : xray
+                : qase
+                  ? "Higher is faster but puts more load on Allure TestOps. Reading from Qase is paced by the rate limit of its plan (step 1) regardless of this value."
+                  : xray
                   ? "Higher is faster but puts more load on Jira, Xray and Allure TestOps."
                   : "Higher is faster but puts more load on both servers. The TestRail rate limit (step 1) caps the pace regardless of this value."
             }

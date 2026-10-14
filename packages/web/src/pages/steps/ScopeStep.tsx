@@ -63,6 +63,7 @@ export function ScopeStep() {
     <Stack>
       <SimpleGrid cols={{ base: 1, lg: isFileSource(profile.source) ? 1 : 2 }} maw={isFileSource(profile.source) ? 640 : undefined}>
         {profile.source === "xray" && <XrayScopeCard onChange={invalidateDiscovery} />}
+        {profile.source === "qase" && <QaseScopeCard onChange={invalidateDiscovery} />}
         {profile.source === "testrail" && (
         <Card withBorder>
           <Stack>
@@ -140,6 +141,90 @@ export function ScopeStep() {
         </Card>
       </SimpleGrid>
     </Stack>
+  );
+}
+
+/** Qase project, optionally some of its suites, and an optional list of cases for a trial run. */
+function QaseScopeCard({ onChange }: { onChange: () => void }) {
+  const { profile, update, flush } = useProfile();
+  const scope = profile.qase.scope;
+  const projects = useQuery({
+    queryKey: ["projects", "qase", profile.id],
+    queryFn: async () => {
+      await flush();
+      const result = await api.checkQase(profile.id);
+      if (!result.ok) {
+        throw new Error(result.message);
+      }
+      return result.projects;
+    },
+  });
+  const suites = useQuery({
+    queryKey: ["suites", "qase", profile.id, scope.projectCode],
+    queryFn: async () => {
+      await flush();
+      return api.qaseSuites(profile.id);
+    },
+    enabled: Boolean(scope.projectCode),
+  });
+  useEffect(() => {
+    const only = projects.data?.length === 1 ? projects.data[0]! : null;
+    if (only?.key && !scope.projectCode) {
+      update((p) => void (p.qase.scope.projectCode = only.key!));
+    }
+  }, [projects.data, scope.projectCode, update]);
+
+  return (
+    <Card withBorder>
+      <Stack>
+        <Title order={4}>From Qase</Title>
+        {projects.error && <Alert color="red">{errorText(projects.error)}</Alert>}
+        <Select
+          label="Project"
+          placeholder={projects.isLoading ? "Loading…" : "Choose a project"}
+          rightSection={projects.isLoading ? <Loader size={14} /> : undefined}
+          searchable
+          data={[
+            ...(projects.data ?? []).filter((p) => p.key).map((p) => ({ value: p.key!, label: p.name })),
+            ...(scope.projectCode && !projects.data?.some((p) => p.key === scope.projectCode) ? [{ value: scope.projectCode, label: scope.projectCode }] : []),
+          ]}
+          value={scope.projectCode || null}
+          onChange={(value) => {
+            update((p) => {
+              p.qase.scope.projectCode = value ?? "";
+              p.qase.scope.suiteIds = [];
+              p.qase.scope.caseIds = [];
+            });
+            onChange();
+          }}
+        />
+        <MultiSelect
+          label="Suites (optional)"
+          description="Only the cases of these suites and of the suites inside them. Leave empty for the whole project."
+          placeholder={suites.isLoading ? "Loading…" : scope.suiteIds.length ? undefined : "All suites"}
+          searchable
+          clearable
+          disabled={!scope.projectCode}
+          data={(suites.data ?? []).map((suite) => ({ value: String(suite.id), label: suite.name }))}
+          value={scope.suiteIds.map(String)}
+          onChange={(values) => {
+            update((p) => void (p.qase.scope.suiteIds = values.map(Number)));
+            onChange();
+          }}
+        />
+        <TagsInput
+          label="Only these cases (optional)"
+          description={`Case ids like 12 or ${scope.projectCode || "DEMO"}-12, useful for a trial migration. Leave empty for everything.`}
+          placeholder="Type an id and press Enter"
+          value={scope.caseIds.map(String)}
+          onChange={(values) => {
+            const ids = values.map((value) => Number(/(\d+)\s*$/.exec(value)?.[1])).filter((id) => Number.isInteger(id) && id > 0);
+            update((p) => void (p.qase.scope.caseIds = [...new Set(ids)]));
+            onChange();
+          }}
+        />
+      </Stack>
+    </Card>
   );
 }
 

@@ -90,6 +90,34 @@ export const XrayScopeSchema = z.object({
 });
 export type XrayScope = z.infer<typeof XrayScopeSchema>;
 
+/**
+ * Qase limits API requests per workspace, by plan: this many per minute and a sixth of it in any
+ * 10 seconds. The tool paces itself below the limit of the chosen plan.
+ */
+export const QASE_RATE_LIMITS = { free: 150, startup: 300, business: 600, enterprise: 1000 } as const;
+
+export const QaseConnectionSchema = z.object({
+  /** Qase API address without the version, e.g. https://api.qase.io. */
+  endpoint: z.string().default("https://api.qase.io"),
+  /** API token (Qase, Apps or personal settings, API tokens). */
+  apiToken: z.string().default(""),
+  /** Address people open Qase at, used for links back to the cases. */
+  appUrl: z.string().default("https://app.qase.io"),
+  rateLimit: z.enum(["free", "startup", "business", "enterprise"]).default("free"),
+  insecureTls: z.boolean().default(false),
+});
+export type QaseConnection = z.infer<typeof QaseConnectionSchema>;
+
+export const QaseScopeSchema = z.object({
+  /** Qase project code, e.g. DEMO. */
+  projectCode: z.string().default(""),
+  /** Only cases of these suites and of the suites inside them. Empty means the whole project. */
+  suiteIds: z.array(z.number().int().positive()).default([]),
+  /** When not empty only these cases are migrated. */
+  caseIds: z.array(z.number().int().positive()).default([]),
+});
+export type QaseScope = z.infer<typeof QaseScopeSchema>;
+
 export const TestRailScopeSchema = z.object({
   projectId: z.number().int().positive().nullable().default(null),
   /** Empty means all suites of the project. */
@@ -123,7 +151,7 @@ export const StructureMappingSchema = z.object({
 });
 export type StructureMapping = z.infer<typeof StructureMappingSchema>;
 
-export const SOURCES = ["testrail", "csv", "xray", "xml"] as const;
+export const SOURCES = ["testrail", "csv", "xray", "xml", "qase"] as const;
 export type SourceType = (typeof SOURCES)[number];
 
 /** Sources that read an uploaded file instead of connecting to a system. */
@@ -268,7 +296,7 @@ export const MigrationOptionsSchema = z.object({
   migrationTagPrefix: z.string().default("testrail"),
   /** Extra tag put on every migrated case, e.g. the migration date. */
   additionalTag: z.string().default(""),
-  /** Add a link back to the source case (TestRail, Xray). */
+  /** Add a link back to the source case (TestRail, Xray, Qase). */
   selfLink: z.boolean().default(true),
   /** How to read TestRail text: `auto` detects HTML produced by the new TestRail editor. */
   textFormat: z.enum(["auto", "markdown", "html"]).default("auto"),
@@ -307,6 +335,10 @@ export const ProfileSchema = z.object({
     connection: XrayConnectionSchema.prefault({}),
     scope: XrayScopeSchema.prefault({}),
   }).prefault({}),
+  qase: z.object({
+    connection: QaseConnectionSchema.prefault({}),
+    scope: QaseScopeSchema.prefault({}),
+  }).prefault({}),
   testops: z.object({
     connection: TestOpsConnectionSchema.prefault({}),
     scope: TestOpsScopeSchema.prefault({}),
@@ -325,6 +357,7 @@ export const SECRET_PATHS = [
   ["xray", "connection", "jiraApiToken"],
   ["xml", "files", "password"],
   ["xml", "files", "headerValue"],
+  ["qase", "connection", "apiToken"],
   ["testops", "connection", "apiToken"],
 ] as const;
 
