@@ -13,6 +13,7 @@ import {
 } from "@atm/shared";
 import { sharedRateLimiter, type RateLimiter } from "../http/rateLimiter.js";
 import { requireProjects, sourceClient } from "../fromtestops/source.js";
+import { WorkflowCloner } from "../fromtestops/workflows.js";
 import { QASE_WINDOW_MS, QaseClient, qaseRequestsPerWindow } from "../qase/client.js";
 import { TestOpsClient } from "../testops/client.js";
 import { discoverTestOps, requireTestOpsProject } from "../testops/discovery.js";
@@ -43,6 +44,8 @@ export class Run {
 
   /** Target project of the case being migrated, for links in the log when a run writes to several projects. */
   private targetProject: number | null = null;
+  /** Copies of another Allure TestOps: workflows and statuses of the source, created in the target when missing. */
+  private workflowCloner: WorkflowCloner | null = null;
 
   constructor(
     /** For a run over several projects, the profile of the project being migrated. */
@@ -278,6 +281,7 @@ export class Run {
     const testops = new TestOpsClient(original.testops.connection, undefined, retryLog("Allure TestOps"));
     const targetProjects = await testops.projects();
     const targetIntegrations = await testops.instanceIntegrations().catch(() => []);
+    this.workflowCloner = new WorkflowCloner(sourceTestOps, testops, this.summary.dryRun, (level, message) => this.log(level, message));
     const pairs = original.testopsSource.projects;
     for (const [index, pair] of pairs.entries()) {
       this.checkCancelled();
@@ -354,6 +358,39 @@ export class Run {
         }
       }
 
+      // Which workflow manual and automated cases follow: the same as in the source.
+      for (const schema of await sourceTestOps.workflowSchemas(pair.sourceId).catch(() => [])) {
+        const workflow = await this.workflowCloner.ensure(schema.workflow.name);
+        if (!workflow) {
+          continue;
+        }
+        if (!project || this.summary.dryRun) {
+          this.log("info", `${schema.type} test cases of project "${pair.targetName}" will follow workflow "${workflow.name}".`);
+          continue;
+        }
+        try {
+          const existing = (await testops.workflowSchemas(project.id)).find((s) => s.type.toLowerCase() === schema.type.toLowerCase());
+          if (existing?.workflow.id === workflow.id) {
+            continue;
+          }
+          if (existing) {
+            await testops.setWorkflowSchema(existing.id, workflow.id);
+          } else {
+            await testops.createWorkflowSchema(project.id, workflow.id, schema.type);
+          }
+          this.log("info", `${schema.type} test cases of project "${project.name}" follow workflow "${workflow.name}".`);
+        } catch (error) {
+          const explanation = explain(error, "set the workflow", { profile: original, service: "Allure TestOps" });
+          this.report("warn", `The workflow of ${schema.type} test cases of project "${project.name}" was not set: ${explanation.title}`, {
+            ...explanation,
+            key: `workflow-schema:${schema.type}`,
+            code: "workflow-schema-not-set",
+            level: "warn",
+            hint: `${explanation.hint} Choose the workflow in the settings of the project (Workflows) if needed.`,
+          });
+        }
+      }
+
       this.profile = {
         ...original,
         testops: { ...original.testops, scope: { projectId: project?.id ?? null } },
@@ -395,7 +432,7 @@ export class Run {
     const testops = new TestOpsClient(profile.testops.connection, undefined, retryLog("Allure TestOps"));
     const project = await testops.project(projectId);
     this.log("info", `Target project: ${project.name} (#${project.id}).`);
-    const targets = new TargetResolver(testops, projectId, (level, message) => this.log(level, message));
+    const targets = new TargetResolver(testops, projectId, (level, message) => this.log(level, message), this.workflowCloner ?? undefined);
 
     this.checkCancelled();
     this.phase(`Reading test cases from ${source.name}`);
@@ -521,6 +558,7 @@ export class Run {
     const members = new Map<string, SourceCase[]>();
     const roles = new Map<string, SourceCase[]>();
     const sharedSteps = new Set<number>();
+    const workflows = new Set<string>();
     let attachments = 0;
     const count = (map: Map<string, SourceCase[]>, key: string | null, testCase: SourceCase) => {
       if (key) {
@@ -548,6 +586,9 @@ export class Run {
           count(roles, member.role, testCase);
         });
         planned.scenario.forEach((step) => step.type === "shared" && sharedSteps.add(step.sourceId));
+        if (planned.workflow) {
+          workflows.add(planned.workflow);
+        }
         attachments += planned.attachments.length;
       } catch (error) {
         if (error instanceof CaseSkipped) {
@@ -577,6 +618,10 @@ export class Run {
       }
     }
 
+    // Workflows of the cases that the target lacks, or whose statuses it lacks: logged as created.
+    for (const name of workflows) {
+      await this.workflowCloner?.ensure(name);
+    }
     if (!testops) {
       this.log("info", "The target project does not exist yet, so custom fields, layers, statuses and users are checked when it is migrated.");
       return;
@@ -641,7 +686,8 @@ export class Run {
     }
     const fieldOf = (kind: string) => fieldFor(this.profile, (t) => t.kind === kind);
     for (const [name, affected] of statuses) {
-      if (!target.statuses.some((status) => status.name.toLowerCase() === name.toLowerCase())) {
+      // A copy of another Allure TestOps creates missing statuses with their workflows.
+      if (this.workflowCloner === null && !target.statuses.some((status) => status.name.toLowerCase() === name.toLowerCase())) {
         for (const testCase of affected) {
           this.report("warn", `Status "${name}" does not exist in Allure TestOps; ${affected.length} case(s) would keep the default status.`, {
             key: `status:${name}`,

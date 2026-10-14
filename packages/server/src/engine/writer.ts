@@ -175,13 +175,24 @@ export class TestOpsWriter {
       }
     }
     if (planned.workflow) {
-      // A status belongs to a workflow: both are set, the status by its name within the workflow.
+      // A status belongs to a workflow: both are set, the status only from that workflow.
       const workflow = await this.targets.workflow(planned.workflow);
       if (workflow) {
-        patch.workflowId = workflow.id;
         const status = planned.status ? workflow.statuses?.find((s) => s.name.toLowerCase() === planned.status!.toLowerCase()) : undefined;
-        if (status) {
-          patch.statusId = status.id;
+        if (status || !planned.status) {
+          patch.workflowId = workflow.id;
+          if (status) {
+            patch.statusId = status.id;
+          }
+        } else {
+          log("warn", `Status "${planned.status}" is not in workflow "${planned.workflow}"; the case keeps its workflow and status.`, {
+            key: `workflow-status:${planned.workflow}:${planned.status}`,
+            code: "workflow-status-missing",
+            level: "warn",
+            title: `Status "${planned.status}" is not in workflow "${planned.workflow}" of the target; these cases keep their workflow and status.`,
+            hint: `Add the status to the workflow in the target Allure TestOps (Administration, Workflows) and run again: migrated cases are updated.`,
+            fix: { step: "connections" },
+          });
         }
       } else {
         log("warn", `Workflow "${planned.workflow}" does not exist; the project's workflow is kept.`, {
@@ -194,7 +205,7 @@ export class TestOpsWriter {
         });
       }
     }
-    if (planned.status && patch.statusId === undefined) {
+    if (planned.status && !planned.workflow) {
       const status = await this.targets.status(planned.status);
       if (status) {
         patch.statusId = status.id;

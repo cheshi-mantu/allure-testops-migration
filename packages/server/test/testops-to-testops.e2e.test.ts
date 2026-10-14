@@ -73,6 +73,16 @@ describe("Allure TestOps to Allure TestOps migration", () => {
       { type: "body", body: "Open the mailbox" },
     ]);
 
+    // A workflow of its own, with a status the target does not have, for manual cases of the project.
+    const inReview = await api.createStatus("In review", "#ffaa00");
+    const flow = await api.createWorkflow("QA flow", [1, inReview.id]);
+    await api.createWorkflowSchema(1, flow.id, "manual");
+    await api.updateTestCase(manual.id, { workflowId: flow.id, statusId: inReview.id });
+
+    // The target already has a workflow of the same name, without that status.
+    const targetApi = new TestOpsClient({ endpoint: url(target), apiToken: "demo-api-token", insecureTls: false });
+    await targetApi.createWorkflow("QA flow", [1]);
+
     const automated = await api.createTestCase(1, "Orders API returns the list");
     automatedId = automated.id;
     await api.updateTestCase(automated.id, { automated: true, statusId: 1 });
@@ -113,6 +123,7 @@ describe("Allure TestOps to Allure TestOps migration", () => {
     const log = (await store.log("dry", summary.id)).map((entry) => entry.message);
     expect(log).toContain('Target project "Demo dry" will be created.');
     expect(log.some((message) => message.startsWith('Tree "Features"'))).toBe(true);
+    expect(log).toContain('Workflow "QA flow" will get the statuses "In review".');
     expect((await new TestOpsClient({ endpoint: url(target), apiToken: "demo-api-token", insecureTls: false }).projects()).map((p) => p.name)).not.toContain("Demo dry");
   });
 
@@ -132,7 +143,14 @@ describe("Allure TestOps to Allure TestOps migration", () => {
     expect(copy.tags).toEqual([`old_id:${manualId}`, "smoke", "auth"]);
     expect(copy.precondition).toBe("The user exists.");
     expect(copy.expectedResult).toBe("The password is changed.");
-    expect(copy.statusId).toBe(2);
+    // The workflow of the target got the missing status; the case has both.
+    const targetApi = new TestOpsClient({ endpoint: url(target), apiToken: "demo-api-token", insecureTls: false });
+    const flow = (await targetApi.workflows()).find((w) => w.name === "QA flow")!;
+    const flowStatuses = await targetApi.allStatuses(flow.id);
+    expect(flowStatuses.map((s) => s.name)).toEqual(["Draft", "In review"]);
+    expect(copy.workflowId).toBe(flow.id);
+    expect(copy.statusId).toBe(flowStatuses.find((s) => s.name === "In review")!.id);
+    expect((await targetApi.workflowSchemas(project.id)).map((schema) => [schema.type, schema.workflow.name])).toEqual([["manual", "QA flow"]]);
     expect(copy.links).toEqual([{ name: "Spec", url: "https://docs.example.com/reset" }]);
     expect(cf(copy, "Epic")).toEqual(["Web"]);
     expect(cf(copy, "Priority").sort()).toEqual(["Critical", "High"]);
@@ -180,6 +198,23 @@ describe("Allure TestOps to Allure TestOps migration", () => {
     expect(state.testCases.filter((tc) => tc.projectId === project.id)).toHaveLength(2);
     expect(state.sharedSteps.filter((s) => s.projectId === project.id)).toHaveLength(1);
     expect(copy.attachments).toHaveLength(2);
+  });
+
+  it("creates a workflow the target lacks, with its statuses", async () => {
+    const api = new TestOpsClient({ endpoint: url(source), apiToken: "demo-api-token", insecureTls: false });
+    const blocked = await api.createStatus("Blocked", "#ff0000");
+    const support = await api.createWorkflow("Support flow", [1, blocked.id]);
+    await api.updateTestCase(automatedId, { workflowId: support.id, statusId: blocked.id });
+    const p = profile("support", "Demo support");
+    p.testopsSource.caseIds = [automatedId];
+    expect((await run(p)).counters).toMatchObject({ created: 1, failed: 0 });
+
+    const targetApi = new TestOpsClient({ endpoint: url(target), apiToken: "demo-api-token", insecureTls: false });
+    const created = (await targetApi.workflows()).find((w) => w.name === "Support flow")!;
+    const statuses = await targetApi.allStatuses(created.id);
+    expect(statuses.map((s) => [s.name, s.color])).toEqual([["Draft", undefined], ["Blocked", "#ff0000"]]);
+    const copy = state.testCases.find((tc) => tc.tags.includes(`old_id:${automatedId}`) && tc.workflowId === created.id)!;
+    expect(copy.statusId).toBe(statuses.find((s) => s.name === "Blocked")!.id);
   });
 
   it("migrates only manual or only automated test cases when asked", async () => {

@@ -30,6 +30,7 @@ interface TestCase {
   issues: unknown[];
   testKeys: { name: string; integrationId: number }[];
   automated?: boolean;
+  workflowId?: number;
   examples: { id: number; parameters: { name: string; value: string }[] }[];
   members: unknown[];
   scenario: Step[];
@@ -89,11 +90,13 @@ export function createTestOpsMock(options: TestOpsMockOptions = {}): { app: Fast
     { id: 1, name: "Demo" },
     { id: 2, name: "Sandbox" },
   ];
-  const statuses: Named[] = [
+  const statuses: (Named & { color?: string })[] = [
     { id: 1, name: "Draft" },
     { id: 2, name: "Active" },
     { id: 3, name: "Outdated" },
   ];
+  const workflows: { id: number; name: string; statusIds: number[] }[] = [{ id: 1, name: "Default", statusIds: statuses.map((s) => s.id) }];
+  const workflowSchemas: { id: number; projectId: number; workflowId: number; type: string }[] = [];
   const accounts = [
     { id: 1, username: "admin", email: "admin@example.com", firstName: "Admin", lastName: "" },
     { id: 2, username: "jane", email: "jane@example.com", firstName: "Jane", lastName: "Doe" },
@@ -272,7 +275,16 @@ export function createTestOpsMock(options: TestOpsMockOptions = {}): { app: Fast
     state.layers.push(layer);
     return layer;
   });
-  app.get("/api/rs/status", async (request) => pageOf(statuses, request));
+  app.get("/api/rs/status", async (request) => {
+    const workflowId = (request.query as { workflowId?: string }).workflowId;
+    const workflow = workflowId ? workflows.find((w) => w.id === Number(workflowId)) : undefined;
+    return pageOf(workflow ? statuses.filter((s) => workflow.statusIds.includes(s.id)) : statuses, request);
+  });
+  app.post("/api/rs/status", async (request) => {
+    const status = { id: id(), ...(request.body as { name: string; color: string }) };
+    statuses.push(status);
+    return status;
+  });
   app.get("/api/rs/integration/project/:id", async (request) => pageOf(integrations[Number((request.params as { id: string }).id)] ?? [], request));
   app.get("/api/rs/integration", async (request) => pageOf(instanceIntegrations, request));
   app.post("/api/rs/integration/project", async (request, reply) => {
@@ -284,7 +296,36 @@ export function createTestOpsMock(options: TestOpsMockOptions = {}): { app: Fast
     (integrations[projectId] ??= []).push({ ...integration, disabled: false });
     return { projectId, ...integration };
   });
-  app.get("/api/rs/workflow", async (request) => pageOf([{ id: 1, name: "Default", statuses }], request));
+  // Like Allure TestOps, the list of workflows does not carry their statuses.
+  app.get("/api/rs/workflow", async (request) => pageOf(workflows.map((w) => ({ id: w.id, name: w.name })), request));
+  app.post("/api/rs/workflow", async (request) => {
+    const body = request.body as { name: string; statuses: { id: number }[] };
+    const workflow = { id: id(), name: body.name, statusIds: body.statuses.map((s) => s.id) };
+    workflows.push(workflow);
+    return { id: workflow.id, name: workflow.name, statuses: statuses.filter((s) => workflow.statusIds.includes(s.id)) };
+  });
+  app.patch("/api/rs/workflow/:id", async (request) => {
+    const workflow = workflows.find((w) => w.id === Number((request.params as { id: string }).id))!;
+    workflow.statusIds = (request.body as { statuses: { id: number }[] }).statuses.map((s) => s.id);
+    return { id: workflow.id, name: workflow.name, statuses: statuses.filter((s) => workflow.statusIds.includes(s.id)) };
+  });
+  app.get("/api/rs/workflowschema", async (request) => {
+    const projectId = Number((request.query as { projectId: string }).projectId);
+    return pageOf(
+      workflowSchemas.filter((s) => s.projectId === projectId).map((s) => ({ ...s, workflow: { id: s.workflowId, name: workflows.find((w) => w.id === s.workflowId)?.name } })),
+      request,
+    );
+  });
+  app.post("/api/rs/workflowschema", async (request) => {
+    const schema = { id: id(), ...(request.body as { projectId: number; workflowId: number; type: string }) };
+    workflowSchemas.push(schema);
+    return schema;
+  });
+  app.patch("/api/rs/workflowschema/:id", async (request) => {
+    const schema = workflowSchemas.find((s) => s.id === Number((request.params as { id: string }).id))!;
+    schema.workflowId = (request.body as { workflowId: number }).workflowId;
+    return schema;
+  });
   app.post("/api/rs/project", async (request) => {
     const project = { id: id(), name: (request.body as { name: string }).name };
     projects.push(project);
@@ -332,8 +373,15 @@ export function createTestOpsMock(options: TestOpsMockOptions = {}): { app: Fast
     state.testCases.push(created);
     return created;
   });
-  app.patch("/api/rs/testcase/:id", async (request) => {
+  app.patch("/api/rs/testcase/:id", async (request, reply) => {
     const tc = testCase(request);
+    // Like Allure TestOps: the status must belong to the workflow of the case.
+    const patch = request.body as { statusId?: number; workflowId?: number };
+    const workflow = workflows.find((w) => w.id === (patch.workflowId ?? tc.workflowId ?? 1));
+    const statusId = patch.statusId ?? tc.statusId;
+    if (workflow && statusId !== null && statusId !== undefined && !workflow.statusIds.includes(statusId)) {
+      return reply.status(400).send({ message: `status (${statusId}) is not present in workflow (${workflow.id})` });
+    }
     Object.assign(tc, request.body as Partial<TestCase>);
     return tc;
   });
@@ -429,6 +477,7 @@ export function createTestOpsMock(options: TestOpsMockOptions = {}): { app: Fast
     const tc = testCase(request);
     const roles: Record<number, string> = { [-1]: "Owner", 2: "Reviewer", 3: "Tester" };
     const status = statuses.find((s) => s.id === tc.statusId) ?? null;
+    const workflow = workflows.find((w) => w.id === (tc.workflowId ?? 1))!;
     return {
       id: tc.id,
       projectId: tc.projectId,
@@ -438,7 +487,7 @@ export function createTestOpsMock(options: TestOpsMockOptions = {}): { app: Fast
       expectedResult: tc.expectedResult,
       automated: tc.automated ?? false,
       status,
-      workflow: { id: 1, name: "Default", statuses },
+      workflow: { id: workflow.id, name: workflow.name, statuses: statuses.filter((s) => workflow.statusIds.includes(s.id)) },
       layer: state.layers.find((l) => l.id === tc.testLayerId) ?? null,
       tags: tc.tags.map((name, index) => ({ id: index + 1, name })),
       links: tc.links,

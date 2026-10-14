@@ -94,8 +94,20 @@ export interface ToProjectIntegration extends ToInstanceIntegration {
   disabled?: boolean;
 }
 
+export interface ToStatus extends ToNamed {
+  color?: string | null;
+}
+
 export interface ToWorkflow extends ToNamed {
-  statuses?: ToNamed[];
+  statuses?: ToStatus[] | null;
+}
+
+/** Which workflow test cases of a type (manual or automated) of a project follow. */
+export interface ToWorkflowSchema {
+  id: number;
+  projectId?: number;
+  type: string;
+  workflow: ToWorkflow;
 }
 
 /** A test case with everything the case page shows, in one answer. */
@@ -230,6 +242,36 @@ export class TestOpsClient {
 
   workflows(): Promise<ToWorkflow[]> {
     return this.all<ToWorkflow>("api/rs/workflow");
+  }
+
+  /** Statuses of the instance, or of one workflow. */
+  allStatuses(workflowId?: number): Promise<ToStatus[]> {
+    return this.all<ToStatus>("api/rs/status", workflowId === undefined ? {} : { workflowId });
+  }
+
+  createStatus(name: string, color: string): Promise<ToStatus> {
+    return this.http.json<ToStatus>("POST", "api/rs/status", { body: { name, color } });
+  }
+
+  createWorkflow(name: string, statusIds: number[]): Promise<ToWorkflow> {
+    return this.http.json<ToWorkflow>("POST", "api/rs/workflow", { body: { name, statuses: statusIds.map((id) => ({ id })) } });
+  }
+
+  /** Replaces the statuses of a workflow. */
+  setWorkflowStatuses(workflowId: number, statusIds: number[]): Promise<ToWorkflow> {
+    return this.http.json<ToWorkflow>("PATCH", `api/rs/workflow/${workflowId}`, { body: { statuses: statusIds.map((id) => ({ id })) } });
+  }
+
+  workflowSchemas(projectId: number): Promise<ToWorkflowSchema[]> {
+    return this.all<ToWorkflowSchema>("api/rs/workflowschema", { projectId });
+  }
+
+  createWorkflowSchema(projectId: number, workflowId: number, type: string): Promise<ToWorkflowSchema> {
+    return this.http.json<ToWorkflowSchema>("POST", "api/rs/workflowschema", { body: { projectId, workflowId, type } });
+  }
+
+  setWorkflowSchema(schemaId: number, workflowId: number): Promise<ToWorkflowSchema> {
+    return this.http.json<ToWorkflowSchema>("PATCH", `api/rs/workflowschema/${schemaId}`, { body: { workflowId } });
   }
 
   createProject(name: string): Promise<ToNamed> {

@@ -67,6 +67,7 @@ export type Operation =
   | "add comments"
   | "set the examples"
   | "create the project"
+  | "set the workflow"
   | "add the integration"
   | "upload attachments"
   | "set the scenario"
