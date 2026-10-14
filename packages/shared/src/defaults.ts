@@ -16,7 +16,9 @@ export function newProfile(id: string, name: string, now = new Date(), source: S
           ? { options: { migrationTagPrefix: "xray" }, structure: { treeName: "Xray folders" } }
           : source === "qase"
             ? { options: { migrationTagPrefix: "qase" }, structure: { treeName: "Qase suites" } }
-            : {}),
+            : source === "testops"
+              ? { options: { migrationTagPrefix: "old_id", selfLink: false }, structure: { createTree: false } }
+              : {}),
   });
 }
 

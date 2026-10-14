@@ -44,6 +44,7 @@ export interface ToTestCase {
 
 export interface ToTestCasePatch {
   name?: string;
+  automated?: boolean;
   description?: string;
   precondition?: string;
   expectedResult?: string;
@@ -81,6 +82,64 @@ export interface ToIntegration extends ToNamed {
 
 export interface ToTree extends ToNamed {
   fields?: ToNamed[];
+}
+
+/** An integration of the instance (issue tracker, test management system...). */
+export interface ToInstanceIntegration extends ToNamed {
+  info?: { name?: string; type?: string | null } | null;
+}
+
+/** An integration of a project: `id` is the integration. */
+export interface ToProjectIntegration extends ToInstanceIntegration {
+  disabled?: boolean;
+}
+
+export interface ToWorkflow extends ToNamed {
+  statuses?: ToNamed[];
+}
+
+/** A test case with everything the case page shows, in one answer. */
+export interface ToTestCaseOverview {
+  id: number;
+  projectId: number;
+  name: string;
+  description?: string | null;
+  precondition?: string | null;
+  expectedResult?: string | null;
+  automated?: boolean | null;
+  deleted?: boolean | null;
+  status?: ToNamed | null;
+  workflow?: ToWorkflow | null;
+  layer?: ToNamed | null;
+  tags?: ToNamed[] | null;
+  links?: { name?: string | null; url: string; type?: string | null }[] | null;
+  issues?: { id?: number; integrationId?: number | null; name: string; url?: string | null }[] | null;
+  testKeys?: { id?: number; integrationId?: number | null; name: string; url?: string | null }[] | null;
+  customFields?: { id?: number; name: string; customField: ToNamed }[] | null;
+  members?: { id?: number; name: string; role?: ToNamed | null }[] | null;
+  examples?: { id?: number; parameters?: { name: string; value: string }[] | null }[] | null;
+  createdBy?: string | null;
+  createdDate?: number | null;
+}
+
+/** One step of a scenario as Allure TestOps lists it: steps refer to their children by id. */
+export interface ToNormalizedStep {
+  id: number;
+  body?: string | null;
+  /** Id of the step that holds the expected result as its children. */
+  expectedResultId?: number | null;
+  attachmentId?: number | null;
+  sharedStepId?: number | null;
+  children?: number[] | null;
+}
+
+export interface ToNormalizedScenarioFull extends ToNormalizedScenario {
+  scenarioSteps?: Record<string, ToNormalizedStep> | null;
+  attachments?: Record<string, { id: number; name?: string | null; contentType?: string | null }> | null;
+  /** Shared steps the scenario calls, by id, with their name in `body`. */
+  sharedSteps?: Record<string, ToNormalizedStep & { name?: string | null }> | null;
+  sharedStepScenarioSteps?: Record<string, ToNormalizedStep> | null;
+  sharedStepAttachments?: Record<string, { id: number; name?: string | null; contentType?: string | null }> | null;
 }
 
 const PAGE_SIZE = 100;
@@ -121,6 +180,60 @@ export class TestOpsClient {
       }
     }
     return items;
+  }
+
+  // ------------------------------------------------------------------ reading a project (source)
+
+  /** Ids, names and the automated flag of the test cases of a project, automated and manual. */
+  async testCaseIds(projectId: number): Promise<{ id: number; name: string; automated?: boolean | null }[]> {
+    return this.all<{ id: number; name: string; automated?: boolean | null }>("api/rs/testcase/__search", { projectId, rql: "true", sort: "id,asc" });
+  }
+
+  overview(testCaseId: number): Promise<ToTestCaseOverview> {
+    return this.http.get<ToTestCaseOverview>(`api/rs/testcase/${testCaseId}/overview`);
+  }
+
+  scenario(testCaseId: number): Promise<ToNormalizedScenarioFull> {
+    return this.http.get<ToNormalizedScenarioFull>(`api/rs/testcase/${testCaseId}/step`);
+  }
+
+  sharedStepScenario(sharedStepId: number): Promise<ToNormalizedScenarioFull> {
+    return this.http.get<ToNormalizedScenarioFull>(`api/rs/sharedstep/${sharedStepId}/step`);
+  }
+
+  sharedStep(sharedStepId: number): Promise<ToNamed> {
+    return this.http.get<ToNamed>(`api/rs/sharedstep/${sharedStepId}`);
+  }
+
+  testCaseAttachmentContent(attachmentId: number): Promise<{ data: Buffer; contentType: string | null; fileName: string | null }> {
+    return this.http.bytes(`api/rs/testcase/attachment/${attachmentId}/content`);
+  }
+
+  sharedStepAttachmentContent(attachmentId: number): Promise<{ data: Buffer; contentType: string | null; fileName: string | null }> {
+    return this.http.bytes(`api/rs/sharedstep/attachment/${attachmentId}/content`);
+  }
+
+  /** Integrations of the instance. */
+  instanceIntegrations(): Promise<ToInstanceIntegration[]> {
+    return this.all<ToInstanceIntegration>("api/rs/integration");
+  }
+
+  /** Integrations a project uses, enabled or not. */
+  projectIntegrations(projectId: number): Promise<ToProjectIntegration[]> {
+    return this.all<ToProjectIntegration>(`api/rs/integration/project/${projectId}`);
+  }
+
+  /** Adds an integration of the instance to a project, with no project settings. */
+  addIntegrationToProject(projectId: number, integrationId: number): Promise<unknown> {
+    return this.http.json("POST", "api/rs/integration/project", { body: { projectId, integrationId } });
+  }
+
+  workflows(): Promise<ToWorkflow[]> {
+    return this.all<ToWorkflow>("api/rs/workflow");
+  }
+
+  createProject(name: string): Promise<ToNamed> {
+    return this.http.json<ToNamed>("POST", "api/rs/project", { body: { name } });
   }
 
   // ------------------------------------------------------------------ account & projects

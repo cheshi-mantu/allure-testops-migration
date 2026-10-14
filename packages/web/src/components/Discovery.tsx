@@ -14,7 +14,7 @@ export function DiscoveryGate({ children, needTestOps = true }: { children: Reac
   const { profile, source: testrail, testops, refreshDiscovery } = useProfile();
   const started = useRef(false);
   const sourceReady =
-    profile.source === "csv" ? Boolean(profile.csv.fileId) : profile.source === "xml" ? Boolean(profile.xml.fileId) : profile.source === "qase" ? Boolean(profile.qase.scope.projectCode) : profile.source === "xray" ? Boolean(profile.xray.scope.projectKey) : Boolean(profile.testrail.scope.projectId);
+    profile.source === "csv" ? Boolean(profile.csv.fileId) : profile.source === "xml" ? Boolean(profile.xml.fileId) : profile.source === "qase" ? Boolean(profile.qase.scope.projectCode) : profile.source === "testops" ? profile.testopsSource.projects.length > 0 : profile.source === "xray" ? Boolean(profile.xray.scope.projectKey) : Boolean(profile.testrail.scope.projectId);
   const ready = sourceReady && (!needTestOps || Boolean(profile.testops.scope.projectId));
 
   useEffect(() => {
@@ -32,7 +32,7 @@ export function DiscoveryGate({ children, needTestOps = true }: { children: Reac
   }, [ready, needTestOps, testrail.data, testrail.isFetching, testops.data, testops.isFetching, refreshDiscovery]);
 
   if (!ready) {
-    const what = profile.source === "csv" ? "the CSV file" : profile.source === "xml" ? "the XML file" : profile.source === "qase" ? "the Qase project" : profile.source === "xray" ? "the Jira project" : "the TestRail project";
+    const what = profile.source === "csv" ? "the CSV file" : profile.source === "xml" ? "the XML file" : profile.source === "qase" ? "the Qase project" : profile.source === "testops" ? "the projects of the source Allure TestOps" : profile.source === "xray" ? "the Jira project" : "the TestRail project";
     return <Alert color="yellow">Choose {what}{needTestOps ? " and the Allure TestOps project" : ""} first.</Alert>;
   }
   const loading = testrail.isFetching || (needTestOps && testops.isFetching);
@@ -46,6 +46,8 @@ export function DiscoveryGate({ children, needTestOps = true }: { children: Reac
             ? "Reading the file…"
             : profile.source === "qase"
               ? "Reading suites, fields and sample cases from Qase…"
+              : profile.source === "testops"
+              ? "Reading sample cases from the source Allure TestOps…"
               : profile.source === "xray"
               ? "Reading Jira fields and sample tests from Jira and Xray…"
               : "Reading projects, suites, sections, fields and sample cases…"}
@@ -95,7 +97,7 @@ export function RefreshButton() {
       loading={source.isFetching || testops.isFetching}
       onClick={() => void refreshDiscovery()}
     >
-      Reload from {isFileSource(profile.source) ? "the file and" : profile.source === "xray" ? "Jira, Xray and" : profile.source === "qase" ? "Qase and" : "TestRail and"} Allure TestOps
+      Reload from {isFileSource(profile.source) ? "the file and" : profile.source === "xray" ? "Jira, Xray and" : profile.source === "qase" ? "Qase and" : profile.source === "testops" ? "the source and the target" : "TestRail and"} Allure TestOps
     </Button>
   );
 }

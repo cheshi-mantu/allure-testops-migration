@@ -66,6 +66,8 @@ export type Operation =
   | "set members"
   | "add comments"
   | "set the examples"
+  | "create the project"
+  | "add the integration"
   | "upload attachments"
   | "set the scenario"
   | "migrate a shared step"

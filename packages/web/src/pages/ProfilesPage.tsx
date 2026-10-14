@@ -104,6 +104,8 @@ export function ProfilesPage() {
                 ? `${profile.source === "xml" ? "XML" : "CSV"} ${profile.fileName ? `"${profile.fileName}"` : "file not chosen"}`
                 : profile.source === "qase"
                   ? `Qase project ${profile.qaseProject || "not chosen"}`
+                  : profile.source === "testops"
+                  ? `Allure TestOps: ${profile.testopsProjects?.length ? profile.testopsProjects.join(", ") : "no projects chosen"}`
                   : profile.source === "xray"
                   ? `Xray project ${profile.xrayProject || "not chosen"}`
                   : profile.testrailEndpoint || "not set"}
@@ -133,7 +135,7 @@ export function ProfilesPage() {
                 const next = value as SourceType;
                 setSource(next);
                 if (!nameTouched) {
-                  setName(next === "csv" ? "CSV import" : next === "xml" ? "XML import" : next === "xray" ? "Xray migration" : next === "qase" ? "Qase migration" : "TestRail migration");
+                  setName(next === "csv" ? "CSV import" : next === "xml" ? "XML import" : next === "xray" ? "Xray migration" : next === "qase" ? "Qase migration" : next === "testops" ? "Allure TestOps copy" : "TestRail migration");
                 }
               }}
             >
@@ -143,6 +145,11 @@ export function ProfilesPage() {
                   value="xray"
                   label="Xray Cloud"
                   description="Reads Xray tests of a Jira Cloud project: steps, Cucumber and generic definitions, folders, preconditions, test sets and plans, and every Jira field."
+                />
+                <Radio
+                  value="testops"
+                  label="Another Allure TestOps"
+                  description="Copies chosen projects of one Allure TestOps instance into another, one to one: every test case with its fields, custom fields, steps, shared steps, files, members, issues and comments."
                 />
                 <Radio
                   value="qase"

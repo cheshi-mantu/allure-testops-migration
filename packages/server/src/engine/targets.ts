@@ -1,4 +1,4 @@
-import type { TestOpsClient, ToNamed } from "../testops/client.js";
+import type { TestOpsClient, ToNamed, ToWorkflow } from "../testops/client.js";
 import { OperationFailed } from "./problems.js";
 
 type Logger = (level: "info" | "warn", message: string) => void;
@@ -17,6 +17,7 @@ export class TargetResolver {
   /** Username by username and by lower-case email. */
   private accounts: Promise<Map<string, string> | null> | null = null;
   private roleList: Promise<ToNamed[]> | null = null;
+  private workflowList: Promise<ToWorkflow[]> | null = null;
 
   constructor(
     private readonly client: TestOpsClient,
@@ -106,6 +107,12 @@ export class TargetResolver {
   async role(name: string): Promise<ToNamed | null> {
     this.roleList ??= this.client.roles().catch(() => []);
     return (await this.roleList).find((r) => r.name.toLowerCase() === name.trim().toLowerCase()) ?? null;
+  }
+
+  /** Workflows are configured by an administrator and are not created by the migration. */
+  async workflow(name: string): Promise<ToWorkflow | null> {
+    this.workflowList ??= this.client.workflows().catch(() => []);
+    return (await this.workflowList).find((w) => w.name.toLowerCase() === name.trim().toLowerCase()) ?? null;
   }
 
   /** Statuses belong to workflows and are not created by the migration. */

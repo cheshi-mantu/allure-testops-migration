@@ -127,6 +127,38 @@ export const TestRailScopeSchema = z.object({
 });
 export type TestRailScope = z.infer<typeof TestRailScopeSchema>;
 
+/** A project of the source Allure TestOps and the project of the target it goes to. */
+export const TestOpsProjectPairSchema = z.object({
+  sourceId: z.number().int().positive(),
+  sourceName: z.string(),
+  /** Name of the target project: found by this name, or created with it. */
+  targetName: z.string(),
+});
+export type TestOpsProjectPair = z.infer<typeof TestOpsProjectPairSchema>;
+
+/**
+ * Another Allure TestOps instance as the source: the chosen projects are copied one to one, each
+ * into a project of the target with the same name.
+ */
+export const TestOpsSourceSchema = z.object({
+  connection: z
+    .object({
+      endpoint: z.string().default(""),
+      apiToken: z.string().default(""),
+      insecureTls: z.boolean().default(false),
+    })
+    .prefault({}),
+  projects: z.array(TestOpsProjectPairSchema).default([]),
+  /** Integration of the source (issue tracker or test management system) by id -> integration of the target; null skips it. */
+  integrations: z.record(z.string(), z.number().int().positive().nullable()).default({}),
+  /** Trial run: only these test cases (ids in the source). Empty means all. */
+  caseIds: z.array(z.number().int().positive()).default([]),
+  /** Which test cases are migrated by their automated flag; both by default. */
+  manual: z.boolean().default(true),
+  automated: z.boolean().default(true),
+});
+export type TestOpsSource = z.infer<typeof TestOpsSourceSchema>;
+
 export const TestOpsScopeSchema = z.object({
   projectId: z.number().int().positive().nullable().default(null),
 });
@@ -151,7 +183,7 @@ export const StructureMappingSchema = z.object({
 });
 export type StructureMapping = z.infer<typeof StructureMappingSchema>;
 
-export const SOURCES = ["testrail", "csv", "xray", "xml", "qase"] as const;
+export const SOURCES = ["testrail", "csv", "xray", "xml", "qase", "testops"] as const;
 export type SourceType = (typeof SOURCES)[number];
 
 /** Sources that read an uploaded file instead of connecting to a system. */
@@ -347,6 +379,8 @@ export const ProfileSchema = z.object({
     connection: TestOpsConnectionSchema.prefault({}),
     scope: TestOpsScopeSchema.prefault({}),
   }).prefault({}),
+  /** Source Allure TestOps, for profiles whose source is "testops"; `testops` above is always the target. */
+  testopsSource: TestOpsSourceSchema.prefault({}),
   structure: StructureMappingSchema.prefault({}),
   fields: z.array(FieldMappingSchema).default([]),
   options: MigrationOptionsSchema.prefault({}),
@@ -362,6 +396,7 @@ export const SECRET_PATHS = [
   ["xml", "files", "password"],
   ["xml", "files", "headerValue"],
   ["qase", "connection", "apiToken"],
+  ["testopsSource", "connection", "apiToken"],
   ["testops", "connection", "apiToken"],
 ] as const;
 

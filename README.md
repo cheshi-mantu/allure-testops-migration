@@ -1,6 +1,6 @@
 # Allure TestOps Migration
 
-A web tool that moves test cases into [Allure TestOps](https://qameta.io/) from **TestRail**, **Xray Cloud**, **Qase**, any **CSV file** or an **XML export** of another test management tool.
+A web tool that moves test cases into [Allure TestOps](https://qameta.io/) from **TestRail**, **Xray Cloud**, **Qase**, **another Allure TestOps**, any **CSV file** or an **XML export** of another test management tool.
 
 Everything is configured in the browser: connect the systems, map the source structure and fields to Allure TestOps using live data from both sides, preview a converted case, do a dry run, then migrate. Running the migration again updates the migrated cases instead of duplicating them.
 
@@ -152,6 +152,18 @@ Create a profile with *Qase* as the source. The steps are Connections, Projects,
 | Files of the case and of steps, images in text | Attachments; images keep their place in text |
 
 Every migrated case gets the tag `qase:<project code>-<case id>`, for example `qase:demo-12`, and a link back to the case in Qase. Qase text is Markdown and is kept as it is.
+
+## Another Allure TestOps
+
+Create a profile with *Another Allure TestOps* as the source to copy projects of one Allure TestOps instance into another, one to one. The steps are Connections, Projects, Options, Preview and Run; there is no field mapping, because every field keeps its name.
+
+- **Connections.** The URL and an API token of both instances. The source is only read.
+- **Projects.** Choose any number of projects of the source. Each goes into a project of the target with the same name, which you can change: the project is created on the first run and found by its name on the next ones. Manual and automated test cases are both migrated by default; either can be left out, by the Automated flag of the case. A list of case ids limits a trial run.
+- **Integrations.** Issues and test keys belong to an integration (Jira, YouTrack…). For every integration the chosen projects use, choose the integration of the target they go through; one with the same name and type is suggested, and the migration adds it to the target project. Credentials of integrations cannot be copied: if the target has no such integration, an administrator sets it up there first (Administration, Integrations), then reload the list.
+
+Every test case is copied, manual and automated: name, description, precondition and expected result, the automated flag, the scenario with nested steps, expected results and files, shared steps with their files, tags, links, the test layer, the workflow and status, the owner and members with their roles, every custom field with all its values, issues and test keys, examples and comments. The trees of the project are copied with their custom fields. Custom fields, their values and layers missing in the target are created; workflows, statuses and roles are matched by name, so they must exist in the target with the same names, and the dry run and the run log say what is missing.
+
+Every copied case gets the tag `old_id:<id of the case in the source>`, for example `old_id:12344`; reruns find the cases by this tag and update them. Test plans, launches and their results, defects and links between test cases are not copied.
 
 ## Values as they are written
 

@@ -54,6 +54,7 @@ packages/
   server/src/testrail/      TestRail client, discovery, field and section handling
   server/src/xray/          Xray Cloud (GraphQL) and Jira Cloud (REST v3) clients, field catalog, wiki markup, transform, discovery
   server/src/qase/          Qase REST v1 client paced for the workspace rate limit, field catalog, transform, files and shared steps, discovery
+  server/src/fromtestops/    another Allure TestOps as the source: reading a case (overview, normalized scenario, comments, files, shared steps) and the one to one transform
   server/src/csv/           CSV reading, column suggestions, grouping rows into cases, step parsing, transform
   server/src/xml/           generic XML reading (read.ts) and the XML source on top of the CSV table model (source.ts)
   server/src/convert/       TestRail case to PlannedCase (pure), text and markup conversion
@@ -196,6 +197,10 @@ Step bodies are plain text; `description`, `precondition`, `expectedResult` and 
 - A problems list grouped by cause, with counts, affected records and a fix button; a downloadable plain text log.
 - Required settings block the next step and the run with a message in red, instead of silent defaults.
 - Runs remember the source, project and tag prefix they used; runs made with other settings are shown as such.
+
+### Another Allure TestOps as the source
+
+A profile with the source `testops` copies several projects in one run: `profile.testopsSource` holds the source connection, the project pairs (source id, target name) and the integration mapping, and `profile.testops` stays the target. The runner finds or creates each target project by name, adds the mapped integrations to it, copies its trees, then migrates the project like any other source with a profile narrowed to that pair. The transform reads `GET api/rs/testcase/{id}/overview` and the normalized scenario `GET api/rs/testcase/{id}/step`, where steps refer to children by id and an expected result is a child step the parent points to with `expectedResultId`. Files of cases and shared steps are planned as `c<id>` and `s<id>`. A case is tagged `old_id:<source id>` by default.
 
 ### File sources: CSV and XML
 

@@ -243,6 +243,26 @@ const QASE_STEPS: StepDef[] = [
   },
 ];
 
+const TESTOPS_SOURCE_STEPS: StepDef[] = [
+  {
+    key: "connections",
+    label: "Connections",
+    description: "Source and target Allure TestOps",
+    icon: <IconPlugConnected size={16} />,
+    done: (p) =>
+      Boolean(p.testopsSource.connection.endpoint && hasSecret(p.testopsSource.connection.apiToken) && p.testops.connection.endpoint && hasSecret(p.testops.connection.apiToken)),
+    render: () => <ConnectionsStep />,
+  },
+  {
+    key: "scope",
+    label: "Projects",
+    description: "Which projects, their integrations",
+    icon: <IconTarget size={16} />,
+    done: (p) => p.testopsSource.projects.length > 0,
+    render: () => <ScopeStep />,
+  },
+];
+
 const COMMON_STEPS: StepDef[] = [
   {
     key: "options",
@@ -272,7 +292,7 @@ const COMMON_STEPS: StepDef[] = [
 ];
 
 function stepsFor(profile: Profile): StepDef[] {
-  const sourceSteps = profile.source === "csv" ? CSV_STEPS : profile.source === "xml" ? XML_STEPS : profile.source === "xray" ? XRAY_STEPS : profile.source === "qase" ? QASE_STEPS : TESTRAIL_STEPS;
+  const sourceSteps = profile.source === "csv" ? CSV_STEPS : profile.source === "xml" ? XML_STEPS : profile.source === "xray" ? XRAY_STEPS : profile.source === "qase" ? QASE_STEPS : profile.source === "testops" ? TESTOPS_SOURCE_STEPS : TESTRAIL_STEPS;
   return [...sourceSteps, ...COMMON_STEPS];
 }
 

@@ -63,6 +63,12 @@ export const api = {
   checkTestOps: (id: string) => request<CheckResult>("POST", `/api/profiles/${id}/testops/check`),
   checkXray: (id: string) => request<CheckResult>("POST", `/api/profiles/${id}/xray/check`),
   checkQase: (id: string) => request<CheckResult>("POST", `/api/profiles/${id}/qase/check`),
+  checkTestOpsSource: (id: string) => request<CheckResult>("POST", `/api/profiles/${id}/testops-source/check`),
+  testOpsSourceIntegrations: (id: string) =>
+    request<{
+      source: { id: number; name: string; type: string | null; projects: string[]; suggested: number | null }[];
+      target: { id: number; name: string; type: string | null }[];
+    }>("GET", `/api/profiles/${id}/testops-source/integrations`),
   qaseSuites: (id: string) => request<NamedId[]>("GET", `/api/profiles/${id}/qase/suites`),
   checkXmlFiles: (id: string) => request<ConnectionCheck>("POST", `/api/profiles/${id}/xml/files/check`),
   testRailSuites: (id: string) => request<{ suiteMode: number; suites: NamedId[] }>("GET", `/api/profiles/${id}/testrail/suites`),
