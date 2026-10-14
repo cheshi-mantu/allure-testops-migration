@@ -4,6 +4,7 @@ import { z } from "zod";
 import {
   maskSecrets,
   newProfile,
+  normalizePlanned,
   PROFILE_FORMAT_VERSION,
   ProfileSchema,
   restoreSecrets,
@@ -30,7 +31,10 @@ import { explain, KnownProblem, OperationFailed, serviceOf } from "../engine/pro
 import { HttpError } from "../http/httpClient.js";
 import { prepareSource } from "../engine/sources.js";
 import type { FileStore } from "../storage/fileStore.js";
-import { checkTestOps, checkTestRail, checkXray } from "./checks.js";
+import { checkQase, checkTestOps, checkTestRail, checkXray } from "./checks.js";
+import { discoverQase, loadQaseContext, parseQaseCaseId, readQaseCase } from "../qase/discovery.js";
+import { QaseClient } from "../qase/client.js";
+import { suitePath, transformQaseCase } from "../qase/transform.js";
 import { checkXmlFiles, discoverXml, previewXml } from "../xml/source.js";
 import { discoverXray, loadXrayContext, readCalledTests, readXrayCase } from "../xray/discovery.js";
 import { transformXrayCase } from "../xray/transform.js";
@@ -114,6 +118,7 @@ export async function registerApi(app: FastifyInstance, deps: ApiDeps): Promise<
         updatedAt: profile.updatedAt,
         testrailEndpoint: profile.testrail.connection.endpoint,
         xrayProject: profile.xray.scope.projectKey,
+        qaseProject: profile.qase.scope.projectCode,
         testopsEndpoint: profile.testops.connection.endpoint,
         lastRun: (await runs.list(profile.id))[0] ?? null,
       })),
@@ -186,6 +191,17 @@ export async function registerApi(app: FastifyInstance, deps: ApiDeps): Promise<
   app.post<{ Params: { id: string } }>("/api/profiles/:id/testrail/check", async (request) => checkTestRail(await load(request.params.id)));
   app.post<{ Params: { id: string } }>("/api/profiles/:id/testops/check", async (request) => checkTestOps(await load(request.params.id)));
   app.post<{ Params: { id: string } }>("/api/profiles/:id/xray/check", async (request) => checkXray(await load(request.params.id)));
+  app.post<{ Params: { id: string } }>("/api/profiles/:id/qase/check", async (request) => checkQase(await load(request.params.id)));
+  /** Suites of the chosen Qase project with their full paths, to narrow a migration. */
+  app.get<{ Params: { id: string } }>("/api/profiles/:id/qase/suites", async (request) => {
+    const profile = await load(request.params.id);
+    if (!profile.qase.connection.apiToken || !profile.qase.scope.projectCode.trim()) {
+      return [];
+    }
+    const suites = await new QaseClient(profile.qase.connection).suites(profile.qase.scope.projectCode.trim().toUpperCase());
+    const byId = new Map(suites.map((suite) => [suite.id, suite]));
+    return suites.map((suite) => ({ id: suite.id, name: suitePath(suite.id, byId).join(" / ") })).sort((a, b) => a.name.localeCompare(b.name));
+  });
   app.post<{ Params: { id: string } }>("/api/profiles/:id/xml/files/check", async (request) => checkXmlFiles(await load(request.params.id), files));
 
   app.get<{ Params: { id: string } }>("/api/profiles/:id/testrail/suites", async (request) => {
@@ -207,6 +223,8 @@ export async function registerApi(app: FastifyInstance, deps: ApiDeps): Promise<
         return discoverXml(profile, files);
       case "xray":
         return discoverXray(profile);
+      case "qase":
+        return discoverQase(profile);
       default:
         return discoverTestRail(profile);
     }
@@ -296,10 +314,21 @@ export async function registerApi(app: FastifyInstance, deps: ApiDeps): Promise<
       }
       try {
         const { planned, linkedCaseIds } = source.transform(testCase);
-        return { ...planned, linkedCaseIds };
+        return { ...normalizePlanned(planned), linkedCaseIds };
       } catch (error) {
         throw error instanceof CaseSkipped ? Object.assign(error, { statusCode: 422 }) : error;
       }
+    }
+    if (profile.source === "qase") {
+      const context = await loadQaseContext(profile);
+      const id = parseQaseCaseId(rawId, context.code);
+      const testCase = id === null ? null : await readQaseCase(context, id);
+      if (!testCase) {
+        throw Object.assign(new Error(`"${rawId}" is not a case of Qase project ${context.code}.`), { statusCode: 404 });
+      }
+      context.assets.learn([testCase]);
+      const { planned, linkedCaseIds } = transformQaseCase(testCase, context);
+      return { ...normalizePlanned(planned), linkedCaseIds };
     }
     if (profile.source === "xray") {
       const context = await loadXrayContext(profile);
@@ -318,7 +347,7 @@ export async function registerApi(app: FastifyInstance, deps: ApiDeps): Promise<
           fix: { step: "scope" },
         });
       }
-      return { ...planned, linkedCaseIds };
+      return { ...normalizePlanned(planned), linkedCaseIds };
     }
     const caseId = Number(rawId.replace(/^C/i, ""));
     if (!Number.isInteger(caseId) || caseId <= 0) {
@@ -347,7 +376,7 @@ export async function registerApi(app: FastifyInstance, deps: ApiDeps): Promise<
         step.name = await context.client.getSharedStep(step.sourceId).then((s) => s.title).catch(() => `Shared step ${step.sourceId}`);
       }
     }
-    return { ...planned, linkedCaseIds };
+    return { ...normalizePlanned(planned), linkedCaseIds };
   });
 
   // ------------------------------------------------------------ runs

@@ -1,6 +1,6 @@
 # Allure TestOps Migration
 
-A web tool that moves test cases into [Allure TestOps](https://qameta.io/) from **TestRail**, **Xray Cloud**, any **CSV file** or an **XML export** of another test management tool.
+A web tool that moves test cases into [Allure TestOps](https://qameta.io/) from **TestRail**, **Xray Cloud**, **Qase**, any **CSV file** or an **XML export** of another test management tool.
 
 Everything is configured in the browser: connect the systems, map the source structure and fields to Allure TestOps using live data from both sides, preview a converted case, do a dry run, then migrate. Running the migration again updates the migrated cases instead of duplicating them.
 
@@ -23,6 +23,7 @@ Profiles and run logs are stored in the `migration-data` Docker volume. Use **Ex
 
 - **TestRail**: the URL, a user email and an API key (*My Settings → API Keys*). The API must be enabled in *Administration → Site Settings → API*. Read access to the project is enough.
 - **Xray Cloud**: the Jira Cloud site, the email and an API token of an Atlassian account that can browse the project (*id.atlassian.com → Security → API tokens*), and an Xray API key: client id and client secret (*Jira → Apps → Xray → API Keys*).
+- **Qase**: an API token (*your profile → API tokens*) of a user who can read the project.
 - **CSV**: the file. Exports from spreadsheets, other test management tools and Allure TestOps itself work.
 - **XML**: the file. An export with one element per test case, for example from TestRail or TestLink.
 - **Allure TestOps**: the URL and an API token (*Your profile → API tokens*) of an account that can edit test cases in the target project. Listing users for owner mapping needs administrator rights; without them owners can still be typed in.
@@ -33,7 +34,7 @@ Profiles and run logs are stored in the `migration-data` Docker volume. Use **Ex
 2. **Projects.** The TestRail project, optionally some suites or a list of case ids for a trial run, and the target Allure TestOps project.
 3. **Suites & sections.** The tool scans the section tree of the selected suites and shows how deep it is and which sections sit on each level. Each level gets its own Allure TestOps custom field (for example *Epic*, *Feature*, *Story*) instead of generic `Section1..N` fields. Levels deeper than the ones you map are either joined into the last mapped level (`Login / Errors`) or dropped. The suite name can go to its own field. The tool can create an Allure TestOps tree built from these fields.
 4. **Fields.** Every TestRail field (system and custom) with its type, how often it is filled and example values from sampled cases. Choose a target for each: custom field, tags, layer, status, owner, links, issues, description, precondition, expected result, comment or scenario. Fields with a list of values (dropdowns, priorities, types, users, milestones, checkboxes) show all values with counts; each can be renamed, pointed at an existing Allure TestOps value or skipped. TestRail users are matched to Allure TestOps accounts by email automatically.
-5. **Options.** Migration tag prefix, extra tag, link back to TestRail, text format (HTML detection), how plain text steps are split, attachments, shared steps, deleted cases and parallelism.
+5. **Options.** Migration tag prefix, extra tag, link back to TestRail, text format (HTML detection), how plain text steps are split, where tables of Gherkin Examples go, attachments, shared steps, deleted cases and parallelism.
 6. **Preview.** Converts one real case with the current settings and shows exactly what will be written, including custom fields, text, scenario, attachments and warnings. Nothing is written.
 7. **Run.** A dry run converts every case and checks the plan against Allure TestOps: custom fields and values that will be created, unknown owners and statuses, issues without an integration. The migration shows live progress and a log with links to both systems. Runs can be stopped and repeated.
 
@@ -89,7 +90,46 @@ Xray keeps the details of a test (type, steps, Cucumber or generic definition, f
 | Comments | Comments |
 | Issue attachments, images in text | Test case attachments; images keep their place in text |
 
-Every migrated case gets the tag `xray:<issue key>`. Xray step text and definitions are converted from Jira wiki markup; step text becomes plain text, as Allure TestOps shows step text without formatting.
+Every migrated case gets the tag `xray:<issue key>`, in lower case like every tag: `xray:calc-12`. Xray step text and definitions are converted from Jira wiki markup; step text becomes plain text, as Allure TestOps shows step text without formatting.
+
+## Qase
+
+Create a profile with *Qase* as the source. The steps are Connections, Projects, Suites, Fields, Options, Preview and Run. The tool reads Qase through its public REST API with an API token and never writes to it.
+
+- **Connections.** The API token and the plan of the workspace. Qase limits API requests for the whole workspace: 150 a minute on Free, 300 on Startup, 600 on Teams and Business, 1000 on Enterprise, and at the same time a sixth of that in any 10 seconds. The tool paces all its requests to one Qase below the limit of the chosen plan and waits for as long as Qase asks when it still answers "too many requests"; the run log says how many requests were sent and how long the tool waited. A dedicated Qase has its own API and web addresses, set under *addresses for a dedicated Qase*.
+- **Projects.** The Qase project, optionally some suites (with everything inside them) or a list of case ids for a trial run.
+- **Suites.** Suites nested in suites map to one custom field per level, like TestRail sections, including the tree.
+- **Fields.** Every attribute of the cases is listed with how often it is filled and example values from sampled cases, and gets a target of your choice:
+
+| Qase | Allure TestOps by default |
+| --- | --- |
+| Description, pre-conditions | Description, precondition |
+| Post-conditions | Description, under its own heading |
+| Parameters | Examples of the test case: every combination of the values, while the parameters of a group change together. More than 100 combinations stay in the description as text |
+| Steps (classic) | Scenario: action, data and expected result, nested steps, files of steps |
+| Steps (Gherkin) | Scenario, one step per line; an Examples table stays with its line |
+| Shared steps | Allure TestOps shared steps, or copied into each case |
+| Severity, priority, type, behavior, automation status, milestone | Custom fields with the same names; "Not set" is skipped |
+| Layer, status | Test layer, status (Actual to Active, Deprecated to Outdated) |
+| Is flaky | Custom field Flaky with the value Yes |
+| Tags, author | Tags, owner (matched to Allure TestOps users by email) |
+| Linked issues | Issues of an issue tracker integration, or links |
+| Custom fields of the project | Custom fields with the same names; URL fields as links, text fields in the description |
+| Files of the case and of steps, images in text | Attachments; images keep their place in text |
+
+Every migrated case gets the tag `qase:<project code>-<case id>`, for example `qase:demo-12`, and a link back to the case in Qase. Qase text is Markdown and is kept as it is.
+
+## Values as they are written
+
+Every value the migration writes is trimmed: spaces at the start and the end are removed, and values that are empty after that are left out. This covers names, text, custom field values, tags, links, issues, members, examples and steps.
+
+The test layer and the status are written in lower case, `e2e` and `draft`. Allure TestOps layers and statuses are matched without regard to case, so an existing layer `E2E` or status `Draft` is used as it is; a layer the migration creates is created in lower case.
+
+Every tag the migration writes is in lower case too: the migration tag, the additional tag and the tags that come from source fields (`Smoke` and `smoke` become one tag `smoke`). A case migrated earlier with a tag as the source spells it, for example `xray:CALC-12`, is still found on a rerun, and its tags are rewritten in lower case.
+
+## Gherkin Examples
+
+The table under `Examples:` of a Scenario Outline is read as a whole in every source: Gherkin cases of Qase, Cucumber tests of Xray, BDD scenarios of TestRail, and any text of a CSV or XML file mapped to the scenario. The Options step says where it goes: a Markdown file `examples.md` attached to the step that says Examples (the default), or examples of the test case, one per row with the column titles as parameter names, and then the Examples step is left out of the scenario. Reruns replace the examples of the case.
 
 ## CSV files
 
@@ -116,7 +156,7 @@ There is one XML source for every tool. The file is read by its structure, not b
 - **Steps.** A list of step elements inside a case becomes the scenario. The parts of a step are recognised by their names: action (`content`, `actions`, `step`…), expected result (`expected`, `expectedresults`…) and data (`additional_info`, `data`…). Steps without an expected result are kept. Steps written as text in one field, including BDD scenarios, can be mapped to the scenario too, with the same step formats as in CSV files. A case takes its scenario from the first of these fields that is filled.
 - **Sections.** The named elements around a case (suites, sections, folders, at any depth) are its section path. Its levels are mapped to custom fields on the Sections step exactly like TestRail sections, including the tree.
 - **Mapping.** Every field gets a suggested target from its name and content, the same way as CSV columns, and fields with a short list of values show all values with counts for renaming or skipping. Technical values (internal ids, order numbers) are set to *Do not migrate*. Numeric codes of known exports are translated as a first suggestion, for example TestLink importance `3` to `High`.
-- **Reruns.** Cases are tagged `<prefix>:<case id>` with the id as it is written in the file, for example `xml-regression:C1697`, or a hash of the name when the file has no id.
+- **Reruns.** Cases are tagged `<prefix>:<case id>` with the id as it is written in the file, for example `xml-regression:c1697`, or a hash of the name when the file has no id.
 
 - **Attached files.** An XML file holds the addresses of attached files and of images inside text, not the files. By default a field with such addresses (suggested target *Attachments*) gives links named after the files, and images in text become links. To attach the files themselves, turn on *Download attached files* on the Connection step and enter the address of the source system with a user and password or API key, or a request header. Files listed in fields mapped to *Attachments* are then downloaded and attached to the cases, and images keep their place in text and steps. *Test download* reads the first file the XML refers to and says what is wrong when it cannot. Files are downloaded only from the address you enter and the credentials are sent only to it; addresses on other hosts stay links. A file that cannot be downloaded does not stop the migration: the case is migrated, the run lists the problem, and running again adds the file.
 
@@ -147,7 +187,7 @@ npm test             # unit tests and an end-to-end migration against fake serve
 Run locally with fake TestRail and Allure TestOps servers:
 
 ```bash
-npm run dev:mocks    # TestRail on :4001, Allure TestOps on :4002, Jira and Xray Cloud on :4003
+npm run dev:mocks    # TestRail on :4001, Allure TestOps on :4002, Jira and Xray Cloud on :4003, Qase on :4004
 npm run dev:server   # API and UI on :8080 (UI from packages/web/dist)
 npm run dev:web      # optional: UI with hot reload on :5173, proxies /api to :8080
 ```
@@ -159,7 +199,7 @@ docker compose -f dev-compose.yml up --build -d
 docker compose -f dev-compose.yml run --rm --build tests -d
 ```
 
-Fake server credentials: TestRail user `demo@example.com` with API key `demo-api-key`, Allure TestOps token `demo-api-token`. Inside `dev-compose.yml` use `http://mocks:4001` and `http://mocks:4002` as URLs; from the host use `http://localhost:4001` and `http://localhost:4002`. The fake Jira and Xray Cloud run on port 4003 (`http://mocks:4003` or `http://localhost:4003` for both the Jira site and the Xray API URL): Jira `demo@example.com` with token `demo-jira-token`, Xray client id `demo-client-id` and secret `demo-client-secret`.
+Fake server credentials: TestRail user `demo@example.com` with API key `demo-api-key`, Allure TestOps token `demo-api-token`. Inside `dev-compose.yml` use `http://mocks:4001` and `http://mocks:4002` as URLs; from the host use `http://localhost:4001` and `http://localhost:4002`. The fake Jira and Xray Cloud run on port 4003 (`http://mocks:4003` or `http://localhost:4003` for both the Jira site and the Xray API URL): Jira `demo@example.com` with token `demo-jira-token`, Xray client id `demo-client-id` and secret `demo-client-secret`. The fake Qase runs on port 4004 with the API token `demo-qase-token`: enter `http://mocks:4004` or `http://localhost:4004` as the Qase API address.
 
 ### Test data in a real Xray Cloud
 
@@ -170,6 +210,16 @@ export JIRA_URL=https://yourcompany.atlassian.net JIRA_EMAIL=you@example.com JIR
 export XRAY_CLIENT_ID=... XRAY_CLIENT_SECRET=...   # XRAY_URL for regional sites
 npx tsx dev/xray-seed.ts --project KEY --bulk 300
 npx tsx dev/xray-seed.ts --project KEY --cleanup --yes
+```
+
+### Test data in a real Qase
+
+`dev/qase-seed.ts` fills a Qase project with the same scenarios: suites three levels deep, custom fields of every type (their titles start with "ATM"), milestones, shared steps, attachments, and cases with classic steps (data, expected results, nested steps, files, shared steps), Gherkin cases, cases without steps, parameters, tags and every system field. It is paced for the rate limit of the Free plan. Running it again adds only what is missing. `--dry` shows what would be created, `--create` creates the project when it does not exist. `--cleanup --yes` removes the seeded suites, cases, shared steps and milestones; custom fields belong to the whole workspace, so they are deleted only with `--fields`.
+
+```bash
+export QASE_API_TOKEN=...   # QASE_URL for a dedicated Qase
+npx tsx dev/qase-seed.ts --project CODE --bulk 300
+npx tsx dev/qase-seed.ts --project CODE --cleanup --yes
 ```
 
 ### Test data in a real TestRail
@@ -187,9 +237,9 @@ npx tsx dev/testrail-seed.ts --bulk 300
 ```
 packages/
   shared/   profile schema (zod), API types, default mappings, section level mapping
-  server/   Fastify API, TestRail, Jira, Xray and Allure TestOps clients, CSV and XML reading, conversion, migration engine
+  server/   Fastify API, TestRail, Jira, Xray, Qase and Allure TestOps clients, CSV and XML reading, conversion, migration engine
   web/      React + Mantine UI
-  mocks/    fake TestRail, Jira with Xray Cloud, and Allure TestOps servers with synthetic projects
+  mocks/    fake TestRail, Jira with Xray Cloud, Qase and Allure TestOps servers with synthetic projects
 ```
 
 The conversion is split into a pure transformation (`server/src/convert`), which turns a TestRail case into a planned Allure TestOps case and backs both the preview and the migration, and a writer (`server/src/engine/writer.ts`) that applies the plan idempotently.

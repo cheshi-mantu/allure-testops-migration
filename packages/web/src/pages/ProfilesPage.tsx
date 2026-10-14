@@ -80,7 +80,7 @@ export function ProfilesPage() {
           <Stack align="center" gap="xs">
             <Title order={4}>No profiles yet</Title>
             <Text c="dimmed" ta="center" maw={520}>
-              Create a profile to migrate from TestRail, Xray Cloud or a CSV file: map structure and fields using the real data, preview the result
+              Create a profile to migrate from TestRail, Xray Cloud, Qase, a CSV or an XML file: map structure and fields using the real data, preview the result
               and run the migration. Or import a profile exported on another machine.
             </Text>
             <Button mt="sm" leftSection={<IconPlus size={16} />} onClick={() => setCreating(true)}>
@@ -102,7 +102,9 @@ export function ProfilesPage() {
               From:{" "}
               {profile.source === "csv" || profile.source === "xml"
                 ? `${profile.source === "xml" ? "XML" : "CSV"} ${profile.fileName ? `"${profile.fileName}"` : "file not chosen"}`
-                : profile.source === "xray"
+                : profile.source === "qase"
+                  ? `Qase project ${profile.qaseProject || "not chosen"}`
+                  : profile.source === "xray"
                   ? `Xray project ${profile.xrayProject || "not chosen"}`
                   : profile.testrailEndpoint || "not set"}
             </Text>
@@ -131,7 +133,7 @@ export function ProfilesPage() {
                 const next = value as SourceType;
                 setSource(next);
                 if (!nameTouched) {
-                  setName(next === "csv" ? "CSV import" : next === "xml" ? "XML import" : next === "xray" ? "Xray migration" : "TestRail migration");
+                  setName(next === "csv" ? "CSV import" : next === "xml" ? "XML import" : next === "xray" ? "Xray migration" : next === "qase" ? "Qase migration" : "TestRail migration");
                 }
               }}
             >
@@ -141,6 +143,11 @@ export function ProfilesPage() {
                   value="xray"
                   label="Xray Cloud"
                   description="Reads Xray tests of a Jira Cloud project: steps, Cucumber and generic definitions, folders, preconditions, test sets and plans, and every Jira field."
+                />
+                <Radio
+                  value="qase"
+                  label="Qase"
+                  description="Reads a Qase project through its API: suites, classic and Gherkin steps, shared steps, parameters, system and custom fields, tags and attachments."
                 />
                 <Radio
                   value="csv"

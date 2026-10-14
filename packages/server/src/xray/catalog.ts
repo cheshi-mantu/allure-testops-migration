@@ -1,4 +1,4 @@
-import type { FieldTarget, SourceFieldInfo, SourceFieldKind, TestRailFieldOption } from "@atm/shared";
+import { exampleText, type FieldTarget, type SourceFieldInfo, type SourceFieldKind, type TestRailFieldOption } from "@atm/shared";
 import { ATTACHMENT_SCHEME, htmlToMarkdown } from "../convert/markup.js";
 import type { JiraField, JiraIssueLink, XrayCase } from "./types.js";
 import { wikiToMarkdown } from "./wiki.js";
@@ -418,12 +418,7 @@ export class XrayCatalog {
             counts.set(id, entry);
           });
         } else if (examples.length < 3) {
-          const example = value.labels
-            .join(", ")
-            .replace(/!\[([^\]]*)\]\([^)]*\)/g, (_m, name: string) => `[image${name ? `: ${name}` : ""}]`)
-            .replace(/\s+/g, " ")
-            .trim()
-            .slice(0, 160);
+          const example = exampleText(value.labels.join(", "));
           if (example && !examples.includes(example)) {
             examples.push(example);
           }

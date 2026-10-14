@@ -78,22 +78,24 @@ export class RateLimiter {
 const shared = new Map<string, RateLimiter>();
 
 /**
- * TestRail counts requests per instance, so every client talking to the same instance
- * (discovery, preview, runs of different profiles) shares one limiter.
+ * TestRail and Qase count requests per instance or workspace, so every client talking to the same
+ * one (discovery, preview, runs of different profiles) shares one limiter. `limit` requests are
+ * allowed in any window of `windowMs`, a minute unless told otherwise.
  */
-export function sharedRateLimiter(endpoint: string, requestsPerMinute: number): RateLimiter {
+export function sharedRateLimiter(endpoint: string, limit: number, windowMs = 60_000): RateLimiter {
   let key: string;
   try {
     key = new URL(endpoint).origin.toLowerCase();
   } catch {
     key = endpoint.trim().toLowerCase();
   }
+  key = windowMs === 60_000 ? key : `${key}#${windowMs}`;
   let limiter = shared.get(key);
   if (!limiter) {
-    limiter = new RateLimiter(requestsPerMinute);
+    limiter = new RateLimiter(limit, windowMs);
     shared.set(key, limiter);
   } else {
-    limiter.setLimit(requestsPerMinute);
+    limiter.setLimit(limit);
   }
   return limiter;
 }

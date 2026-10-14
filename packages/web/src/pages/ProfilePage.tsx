@@ -208,6 +208,41 @@ const XRAY_STEPS: StepDef[] = [
   },
 ];
 
+const QASE_STEPS: StepDef[] = [
+  {
+    key: "connections",
+    label: "Connections",
+    description: "Qase and Allure TestOps access",
+    icon: <IconPlugConnected size={16} />,
+    done: (p) => hasSecret(p.qase.connection.apiToken) && Boolean(p.testops.connection.endpoint && hasSecret(p.testops.connection.apiToken)),
+    render: () => <ConnectionsStep />,
+  },
+  {
+    key: "scope",
+    label: "Projects",
+    description: "Which cases and where",
+    icon: <IconTarget size={16} />,
+    done: (p) => Boolean(p.qase.scope.projectCode && p.testops.scope.projectId),
+    render: () => <ScopeStep />,
+  },
+  {
+    key: "structure",
+    label: "Suites",
+    description: "Suite levels → custom fields",
+    icon: <IconHierarchy2 size={16} />,
+    done: (p) => p.structure.levels.some(Boolean),
+    render: () => <StructureStep />,
+  },
+  {
+    key: "fields",
+    label: "Fields",
+    description: "Qase fields → Allure TestOps",
+    icon: <IconListDetails size={16} />,
+    done: (p) => p.fields.length > 0,
+    render: () => <FieldsStep />,
+  },
+];
+
 const COMMON_STEPS: StepDef[] = [
   {
     key: "options",
@@ -237,7 +272,7 @@ const COMMON_STEPS: StepDef[] = [
 ];
 
 function stepsFor(profile: Profile): StepDef[] {
-  const sourceSteps = profile.source === "csv" ? CSV_STEPS : profile.source === "xml" ? XML_STEPS : profile.source === "xray" ? XRAY_STEPS : TESTRAIL_STEPS;
+  const sourceSteps = profile.source === "csv" ? CSV_STEPS : profile.source === "xml" ? XML_STEPS : profile.source === "xray" ? XRAY_STEPS : profile.source === "qase" ? QASE_STEPS : TESTRAIL_STEPS;
   return [...sourceSteps, ...COMMON_STEPS];
 }
 

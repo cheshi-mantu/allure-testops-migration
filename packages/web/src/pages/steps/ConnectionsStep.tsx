@@ -2,7 +2,7 @@ import { Alert, Anchor, Autocomplete, Button, Card, Collapse, Group, NumberInput
 import { IconAlertCircle, IconCircleCheck } from "@tabler/icons-react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
-import { SECRET_MASK, TESTRAIL_RATE_LIMITS, XRAY_REGIONS, type TestRailConnection, type XmlFiles } from "@atm/shared";
+import { QASE_RATE_LIMITS, SECRET_MASK, TESTRAIL_RATE_LIMITS, XRAY_REGIONS, type QaseConnection, type TestRailConnection, type XmlFiles } from "@atm/shared";
 import { api, errorText, type CheckResult } from "../../api/client";
 import { useProfile } from "../../components/ProfileContext";
 
@@ -71,6 +71,7 @@ export function ConnectionsStep() {
       </Text>
       <SimpleGrid cols={{ base: 1, lg: profile.source === "csv" ? 1 : 2 }} maw={profile.source === "csv" ? 640 : undefined}>
         {profile.source === "xray" && <XrayConnectionCard />}
+        {profile.source === "qase" && <QaseConnectionCard />}
         {profile.source === "testrail" && (
         <Card withBorder>
           <Stack>
@@ -311,6 +312,89 @@ function XmlFilesCard() {
             <CheckAlert result={check.data} error={check.error} />
           </>
         )}
+      </Stack>
+    </Card>
+  );
+}
+
+const QASE_PLANS: { value: QaseConnection["rateLimit"]; label: string }[] = [
+  { value: "free", label: `Free: ${QASE_RATE_LIMITS.free} requests per minute` },
+  { value: "startup", label: `Startup: ${QASE_RATE_LIMITS.startup} requests per minute` },
+  { value: "business", label: `Teams or Business: ${QASE_RATE_LIMITS.business} requests per minute` },
+  { value: "enterprise", label: `Enterprise: ${QASE_RATE_LIMITS.enterprise} requests per minute` },
+];
+
+function QaseConnectionCard() {
+  const { profile, update, flush } = useProfile();
+  const queryClient = useQueryClient();
+  const qc = profile.qase.connection;
+  const custom = qc.endpoint.replace(/\/+$/, "") !== "https://api.qase.io" || qc.appUrl.replace(/\/+$/, "") !== "https://app.qase.io" || qc.insecureTls;
+  const [advanced, setAdvanced] = useState(custom);
+  const check = useMutation({
+    mutationFn: async () => {
+      await flush();
+      return api.checkQase(profile.id);
+    },
+    onSuccess: (result) => queryClient.setQueryData(["projects", "qase", profile.id], result.projects),
+  });
+  const set = <K extends keyof QaseConnection>(key: K, value: QaseConnection[K]) => update((p) => void (p.qase.connection[key] = value));
+
+  return (
+    <Card withBorder>
+      <Stack>
+        <Title order={4}>Qase (source)</Title>
+        <PasswordInput
+          label="API token"
+          description={
+            <>
+              Create one in Qase under <i>your profile → API tokens</i>. The token reads what its user can see; the migration only reads.
+            </>
+          }
+          placeholder={secretPlaceholder(qc.apiToken)}
+          value={secretValue(qc.apiToken)}
+          onChange={(e) => set("apiToken", e.currentTarget.value)}
+        />
+        <Select
+          label="Qase plan (API rate limit)"
+          description="Qase limits API requests for the whole workspace, shared with everyone and everything using its API. The tool stays below the limit of the plan and waits when Qase still asks to slow down."
+          allowDeselect={false}
+          data={QASE_PLANS}
+          value={qc.rateLimit}
+          onChange={(value) => value && set("rateLimit", value as QaseConnection["rateLimit"])}
+        />
+        <Anchor component="button" type="button" size="sm" ta="left" onClick={() => setAdvanced((v) => !v)}>
+          {advanced ? "Hide" : "Show"} addresses for a dedicated Qase
+        </Anchor>
+        <Collapse expanded={advanced}>
+          <Stack>
+            <TextInput
+              label="Qase API address"
+              description="https://api.qase.io for Qase Cloud. A dedicated or regional Qase has its own address."
+              placeholder="https://api.qase.io"
+              value={qc.endpoint}
+              onChange={(e) => set("endpoint", e.currentTarget.value)}
+            />
+            <TextInput
+              label="Qase web address"
+              description="Where people open Qase; used for the links back to the cases."
+              placeholder="https://app.qase.io"
+              value={qc.appUrl}
+              onChange={(e) => set("appUrl", e.currentTarget.value)}
+            />
+            <Switch
+              label="Skip TLS certificate verification"
+              description="For servers with self-signed certificates."
+              checked={qc.insecureTls}
+              onChange={(e) => set("insecureTls", e.currentTarget.checked)}
+            />
+          </Stack>
+        </Collapse>
+        <Group>
+          <Button variant="light" loading={check.isPending} onClick={() => check.mutate()}>
+            Test connection
+          </Button>
+        </Group>
+        <CheckAlert result={check.data} error={check.error} />
       </Stack>
     </Card>
   );

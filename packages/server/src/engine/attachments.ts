@@ -11,6 +11,7 @@ const EXTENSIONS: Record<string, string> = {
   "application/pdf": "pdf",
   "text/plain": "txt",
   "text/csv": "csv",
+  "text/markdown": "md",
   "application/json": "json",
   "application/zip": "zip",
   "video/mp4": "mp4",

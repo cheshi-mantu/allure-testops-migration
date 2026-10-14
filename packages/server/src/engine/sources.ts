@@ -1,4 +1,4 @@
-import type { PlannedCase, Profile } from "@atm/shared";
+import { normalizePlanned, type PlannedCase, type Profile } from "@atm/shared";
 import { groupCases, type CsvCase } from "../csv/cases.js";
 import { detectPathSeparator, loadCsv } from "../csv/discovery.js";
 import { transformCsvCase } from "../csv/transform.js";
@@ -11,6 +11,9 @@ import type { TrCase } from "../testrail/types.js";
 import { noAssets, testRailAssets, type SourceAssets } from "./assets.js";
 import { KnownProblem } from "./problems.js";
 import { loadXml, requireNameField, transformXmlCase, xmlCases, type XmlCase } from "../xml/source.js";
+import { loadQaseContext, readQaseCases } from "../qase/discovery.js";
+import { qaseCaseKey, transformQaseCase } from "../qase/transform.js";
+import type { QaseCase } from "../qase/types.js";
 import { XrayAssets } from "../xray/assets.js";
 import { loadXrayContext, readCalledTests, readXrayCases } from "../xray/discovery.js";
 import { transformXrayCase, type XrayContext } from "../xray/transform.js";
@@ -52,6 +55,19 @@ export interface SourceDeps {
 }
 
 export async function prepareSource(profile: Profile, deps: SourceDeps, log: Log, onRetry?: (info: RetryInfo) => void): Promise<PreparedSource> {
+  const prepared = await readySource(profile, deps, log, onRetry);
+  // Whatever the source, values are written trimmed, and tags, layers and statuses in lower case.
+  const transform = prepared.transform.bind(prepared);
+  return {
+    ...prepared,
+    transform: (testCase) => {
+      const result = transform(testCase);
+      return { ...result, planned: normalizePlanned(result.planned) };
+    },
+  };
+}
+
+function readySource(profile: Profile, deps: SourceDeps, log: Log, onRetry?: (info: RetryInfo) => void): Promise<PreparedSource> {
   switch (profile.source) {
     case "csv":
       return prepareCsv(profile, deps, log);
@@ -59,6 +75,8 @@ export async function prepareSource(profile: Profile, deps: SourceDeps, log: Log
       return prepareXml(profile, deps, log, onRetry);
     case "xray":
       return prepareXray(profile, log, onRetry);
+    case "qase":
+      return prepareQase(profile, log, onRetry);
     default:
       return prepareTestRail(profile, log, onRetry);
   }
@@ -89,6 +107,35 @@ async function prepareXml(profile: Profile, deps: SourceDeps, log: Log, onRetry?
       // A trial run on a few cases, chosen by id or name.
       const only = new Set(profile.xml.onlyCases.map((v) => v.trim().toLowerCase()).filter(Boolean));
       return only.size > 0 ? all.filter((c) => only.has(c.key.toLowerCase()) || only.has(c.title.toLowerCase())) : all;
+    },
+  };
+}
+
+type QaseSourceCase = SourceCase & { raw: QaseCase };
+
+async function prepareQase(profile: Profile, log: Log, onRetry?: (info: RetryInfo) => void): Promise<PreparedSource<QaseSourceCase>> {
+  const context = await loadQaseContext(profile, onRetry);
+  context.warnings.forEach((warning) => log("warn", warning));
+  log("info", `Qase project ${context.project.title} (${context.code}): ${context.totalCases} test case(s), ${context.suites.size} suite(s).`);
+  return {
+    name: "Qase",
+    assets: context.assets,
+    testrail: null,
+    transform: (testCase) => transformQaseCase(testCase.raw, context),
+    readCases: async (logCase, isCancelled) => {
+      const cases: QaseCase[] = [];
+      for await (const page of readQaseCases(context, profile)) {
+        cases.push(...page);
+        logCase("info", `Read ${cases.length} case(s) from Qase...`);
+        if (isCancelled()) {
+          break;
+        }
+      }
+      const missing = profile.qase.scope.caseIds.filter((id) => !cases.some((c) => c.id === id));
+      missing.forEach((id) => logCase("warn", `${qaseCaseKey(context.code, id)} is not a case of Qase project ${context.code}.`, qaseCaseKey(context.code, id)));
+      // Which images in text are Qase files is told by the hosts of the attachments.
+      context.assets.learn(cases);
+      return cases.map((raw) => ({ key: qaseCaseKey(context.code, raw.id), title: raw.title, label: qaseCaseKey(context.code, raw.id), raw }));
     },
   };
 }

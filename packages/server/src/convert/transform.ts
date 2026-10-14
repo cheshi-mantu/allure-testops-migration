@@ -1,9 +1,10 @@
-import type { FieldMapping, PlannedCase, PlannedNote, PlannedStep, Profile, TextTarget } from "@atm/shared";
+import { splitValue, type FieldMapping, type PlannedCase, type PlannedNote, type PlannedStep, type Profile, type TextTarget } from "@atm/shared";
 import { note } from "./notes.js";
 import type { FieldCatalog } from "../testrail/fields.js";
 import { mapSectionPath, type SectionTree } from "../testrail/sections.js";
 import type { TrCase, TrProject, TrStep, TrSuite } from "../testrail/types.js";
 import { convertText, referencedCaseIds, type TextOptions } from "./markup.js";
+import { examplesSink, type ExamplesSink } from "./examples.js";
 import { inlineAttachment, separatedSteps, textSteps } from "./steps.js";
 
 export interface SourceContext {
@@ -23,8 +24,9 @@ export interface TransformResult {
   linkedCaseIds: string[];
 }
 
+/** The tag that finds a migrated case on reruns, in lower case like every tag the migration writes. */
 export function migrationTag(prefix: string, caseId: string | number): string {
-  return `${prefix}:${caseId}`;
+  return `${prefix}:${caseId}`.toLowerCase();
 }
 
 function isUrl(value: string): boolean {
@@ -58,7 +60,7 @@ export function mappedValues(testCase: TrCase, mapping: FieldMapping, catalog: F
     return result;
   }
   for (const label of value.labels) {
-    const parts = mapping.separator ? label.split(mapping.separator) : [label];
+    const parts = splitValue(label, mapping.separator);
     for (const part of parts) {
       const key = part.trim();
       push(Object.hasOwn(mapping.values, key) ? mapping.values[key] : key);
@@ -87,6 +89,7 @@ export function transformCase(testCase: TrCase, context: SourceContext): Transfo
   const linked = new Set<number>();
   const inlineIds = new Set<string>();
 
+  const examples = examplesSink(context.profile.options.gherkinExamples);
   const planned: PlannedCase = {
     sourceId: String(testCase.id),
     sourceUrl: `${context.endpoint}index.php?/cases/view/${testCase.id}`,
@@ -212,7 +215,7 @@ export function transformCase(testCase: TrCase, context: SourceContext): Transfo
         break;
       }
       case "scenario": {
-        const steps = scenarioFrom(testCase, mapping.source, field?.kind === "steps", context);
+        const steps = scenarioFrom(testCase, mapping.source, field?.kind === "steps", context, examples);
         if (steps.length === 0) {
           break;
         }
@@ -239,15 +242,18 @@ export function transformCase(testCase: TrCase, context: SourceContext): Transfo
     }
   }
   planned.attachments = [...inlineIds].map(inlineAttachment);
+  if (examples.examples.length > 0) {
+    planned.examples = examples.examples;
+  }
   linked.delete(testCase.id);
   return { planned, linkedCaseIds: [...linked].map(String) };
 }
 
-function scenarioFrom(testCase: TrCase, systemName: string, separated: boolean, context: SourceContext): PlannedStep[] {
+function scenarioFrom(testCase: TrCase, systemName: string, separated: boolean, context: SourceContext, examples: ExamplesSink): PlannedStep[] {
   const raw = testCase[systemName];
   const textOptions: TextOptions = { format: context.profile.options.textFormat };
   if (separated || Array.isArray(raw)) {
     return Array.isArray(raw) ? separatedSteps(raw as TrStep[], textOptions, context.profile.options.migrateSharedSteps) : [];
   }
-  return typeof raw === "string" ? textSteps(raw, context.profile.options.textSteps, textOptions) : [];
+  return typeof raw === "string" ? textSteps(raw, context.profile.options.textSteps, textOptions, examples) : [];
 }

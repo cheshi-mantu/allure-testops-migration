@@ -1,5 +1,6 @@
-import type { PlannedAttachment, PlannedCase, PlannedStep, Profile } from "@atm/shared";
+import { normalizeTags, type PlannedAttachment, type PlannedCase, type PlannedStep, type Profile } from "@atm/shared";
 import { resolveAttachmentImages, resolveCaseLinks } from "../convert/markup.js";
+import { migrationTag } from "../convert/transform.js";
 import type { TestOpsClient, ToAttachment, ToCustomFieldValue, ToScenarioStep, ToTestCase, ToTestCasePatch } from "../testops/client.js";
 import { contentTypeFor, safeFileName } from "./attachments.js";
 import type { CaseAttachments, SourceAssets } from "./assets.js";
@@ -46,7 +47,7 @@ export class TestOpsWriter {
   async testCaseUrlFor(caseId: string): Promise<string | null> {
     let id = this.migrated.get(caseId);
     if (id === undefined) {
-      const found = await this.testops.findTestCaseByTag(this.projectId, `${this.tagPrefix}:${caseId}`).catch(() => null);
+      const found = await this.findByMigrationTag(caseId).catch(() => null);
       if (!found) {
         return null;
       }
@@ -104,7 +105,19 @@ export class TestOpsWriter {
         return byKnownId;
       }
     }
-    return this.op("find the test case", () => this.testops.findTestCaseByTag(this.projectId, `${this.tagPrefix}:${planned.sourceId}`));
+    return this.op("find the test case", () => this.findByMigrationTag(planned.sourceId));
+  }
+
+  /**
+   * The case with the migration tag. Tags are written in lower case; a case migrated before that
+   * may carry the tag as the source spells it, e.g. `xray:CALC-12`: it is found too, and its tags are
+   * rewritten in lower case.
+   */
+  private async findByMigrationTag(sourceId: string): Promise<ToTestCase | null> {
+    const lower = migrationTag(this.tagPrefix, sourceId);
+    const found = await this.testops.findTestCaseByTag(this.projectId, lower);
+    const asWritten = `${this.tagPrefix}:${sourceId}`;
+    return found ?? (asWritten !== lower ? this.testops.findTestCaseByTag(this.projectId, asWritten) : null);
   }
 
   async writeCase(planned: PlannedCase, linkedCaseIds: string[], log: WriteLog): Promise<WriteResult> {
@@ -116,7 +129,7 @@ export class TestOpsWriter {
     }
 
     // Tags first: they make the case findable on rerun even if a later step fails.
-    await this.op("set tags", () => this.testops.setTags(testCase.id, planned.tags));
+    await this.op("set tags", () => this.testops.setTags(testCase.id, normalizeTags(planned.tags)));
 
     const source = this.assets.attachments(planned.sourceId);
     const uploader: Uploader = {
@@ -202,6 +215,17 @@ export class TestOpsWriter {
     }
 
     await this.writeMembers(testCase.id, planned, log);
+
+    if (planned.examples && planned.examples.length > 0) {
+      const examples = planned.examples;
+      try {
+        await this.op("set the examples", () => this.testops.setExamples(testCase.id, examples));
+      } catch (error) {
+        // The case is written; only its examples are missing, e.g. on an Allure TestOps without examples.
+        const problem = this.explainFailure(error, "set the examples");
+        log("warn", `Examples of the case were not written: ${problem.title}`, problem);
+      }
+    }
 
     if (planned.comments.length > 0) {
       await this.op("add comments", async () => {
@@ -453,7 +477,7 @@ export class TestOpsWriter {
   private async migrateSharedStep(sourceId: number, log: WriteLog): Promise<number> {
     const shared = await this.assets.sharedStep(sourceId);
     // Same naming as the previous migration tool, so earlier migrated shared steps are reused.
-    const name = `${shared.title} [${shared.id}]`;
+    const name = shared.name ?? `${shared.title} [${shared.id}]`;
     const target = (await this.testops.findSharedStep(this.projectId, name)) ?? (await this.testops.createSharedStep(this.projectId, name));
     const planned = shared.steps;
     const uploader: Uploader = {

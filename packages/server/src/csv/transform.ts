@@ -1,5 +1,6 @@
-import { mapSectionPath, type FieldMapping, type PlannedCase, type PlannedNote, type PlannedStep, type Profile, type TextTarget } from "@atm/shared";
+import { mapSectionPath, splitValue, type FieldMapping, type PlannedCase, type PlannedNote, type PlannedStep, type Profile, type TextTarget } from "@atm/shared";
 import { note } from "../convert/notes.js";
+import { examplesSink, stepsWithExamples, type ExamplesSink } from "../convert/examples.js";
 import { convertText } from "../convert/markup.js";
 import { migrationTag } from "../convert/transform.js";
 import { CaseSkipped } from "../engine/errors.js";
@@ -21,7 +22,7 @@ function isUrl(value: string): boolean {
 function mappedValues(testCase: CsvCase, mapping: FieldMapping): string[] {
   const result: string[] = [];
   for (const raw of values(testCase, mapping.source)) {
-    const parts = mapping.separator ? raw.split(mapping.separator) : [raw];
+    const parts = splitValue(raw, mapping.separator);
     for (const part of parts) {
       const key = part.trim();
       if (!key) {
@@ -191,7 +192,11 @@ export function transformCsvCase(testCase: CsvCase, context: CsvContext): { plan
     }
   }
 
-  planned.scenario = scenario(testCase, scenarioMapping?.source ?? null, expectedMapping?.source ?? null, stepOptions, context.multiRow);
+  const examples = examplesSink(options.gherkinExamples);
+  planned.scenario = scenario(testCase, scenarioMapping?.source ?? null, expectedMapping?.source ?? null, stepOptions, context.multiRow, examples);
+  if (examples.examples.length > 0) {
+    planned.examples = examples.examples;
+  }
   if (!scenarioMapping && expectedMapping && planned.scenario.length === 0) {
     notes.push({
       code: "expected-without-scenario",
@@ -225,7 +230,8 @@ export function transformCsvCase(testCase: CsvCase, context: CsvContext): { plan
   return { planned, linkedCaseIds: [] };
 }
 
-function scenario(testCase: CsvCase, stepsColumn: string | null, expectedColumn: string | null, options: StepParseOptions, multiRow: boolean): PlannedStep[] {
+function scenario(testCase: CsvCase, stepsColumn: string | null, expectedColumn: string | null, options: StepParseOptions, multiRow: boolean, examples: ExamplesSink): PlannedStep[] {
+  const parse = (text: string) => stepsWithExamples(text, (rest) => parseSteps(rest, options), examples);
   if (!stepsColumn) {
     return [];
   }
@@ -233,7 +239,7 @@ function scenario(testCase: CsvCase, stepsColumn: string | null, expectedColumn:
     // One step (or a few) per row; the row's expected result belongs to the row's last step.
     const steps: PlannedStep[] = [];
     for (const row of testCase.rows) {
-      const rowSteps = parseSteps(row[stepsColumn] ?? "", options);
+      const rowSteps = parse(row[stepsColumn] ?? "");
       const expected = expectedColumn ? (row[expectedColumn] ?? "").trim() : "";
       if (expected) {
         if (rowSteps.length === 0) {
@@ -246,7 +252,7 @@ function scenario(testCase: CsvCase, stepsColumn: string | null, expectedColumn:
     return steps;
   }
   const row = testCase.rows[0]!;
-  const steps = parseSteps(row[stepsColumn] ?? "", options);
+  const steps = parse(row[stepsColumn] ?? "");
   const expected = expectedColumn ? (row[expectedColumn] ?? "") : "";
   if (expected.trim()) {
     attachExpected(steps, parseExpectedTexts(expected, options));

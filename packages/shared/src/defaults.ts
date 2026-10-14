@@ -14,7 +14,9 @@ export function newProfile(id: string, name: string, now = new Date(), source: S
         ? { options: { migrationTagPrefix: "xml", selfLink: false }, structure: { treeName: "XML sections" } }
         : source === "xray"
           ? { options: { migrationTagPrefix: "xray" }, structure: { treeName: "Xray folders" } }
-          : {}),
+          : source === "qase"
+            ? { options: { migrationTagPrefix: "qase" }, structure: { treeName: "Qase suites" } }
+            : {}),
   });
 }
 
@@ -58,6 +60,9 @@ function targetsOf(field: TestRailFieldInfo): FieldTarget["kind"][] {
     case "steps":
       return ["scenario", "ignore"];
     case "text":
+      if (field.systemName === "qase:parameters") {
+        return ["examples", "description", "comment", "ignore"];
+      }
       if (field.systemName === "xray:preconditions") {
         return ["precondition", "description", "comment", "customField", "tag", "ignore"];
       }
@@ -70,7 +75,7 @@ function targetsOf(field: TestRailFieldInfo): FieldTarget["kind"][] {
     case "user":
       return ["owner", "role", "customField", "tag", "ignore"];
     default:
-      if (field.systemName === "refs" || field.systemName.startsWith("jira:link:")) {
+      if (field.systemName === "refs" || field.systemName.startsWith("jira:link:") || field.systemName === "qase:external_issues") {
         return ["issue", "link", "tag", "customField", "ignore"];
       }
       return ["customField", "tag", "layer", "status", "owner", "description", "precondition", "comment", "ignore"];

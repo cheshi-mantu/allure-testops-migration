@@ -62,8 +62,8 @@ export interface SourceFieldInfo {
   suggestedTarget?: import("./profile.js").FieldTarget;
   /** Separator the values seem to use, e.g. a comma in "smoke, ui". */
   suggestedSeparator?: string;
-  /** Translation of values the source stores as codes, e.g. `1` for "Manual". */
-  suggestedValues?: Record<string, string>;
+  /** Translation of values the source stores as codes, e.g. `1` for "Manual"; null skips the value. */
+  suggestedValues?: Record<string, string | null>;
 }
 
 export interface SectionLevelInfo {
@@ -86,7 +86,7 @@ export interface SuiteStructure {
 
 /** What the mapping screens show about the source: structure, fields and sample cases. */
 export interface SourceDiscovery {
-  source: "testrail" | "csv" | "xray" | "xml";
+  source: "testrail" | "csv" | "xray" | "xml" | "qase";
   project: NamedId & { suiteMode: number };
   suites: NamedId[];
   structure: SuiteStructure[];
@@ -255,6 +255,9 @@ export type PlannedStep =
     }
   | { type: "shared"; sourceId: number; name: string };
 
+/** One example of a test case: a value for each of its parameters. */
+export type PlannedExample = { name: string; value: string }[];
+
 export interface PlannedCase {
   /** Identifies the case in the source; the migration tag is `<prefix>:<sourceId>`. */
   sourceId: string;
@@ -276,6 +279,8 @@ export interface PlannedCase {
   issues: { key: string; integrationId: number | null }[];
   /** Keys of the case in a test management system known to Allure TestOps through an integration, e.g. an Xray test key. */
   testKeys?: { key: string; integrationId: number }[];
+  /** Examples of the test case (sets of parameter values); the case keeps what it has when not set. */
+  examples?: PlannedExample[];
   comments: string[];
   attachments: PlannedAttachment[];
   scenario: PlannedStep[];
@@ -342,13 +347,15 @@ export interface RunLogEntry {
 export interface ProfileListItem {
   id: string;
   name: string;
-  source: "testrail" | "csv" | "xray" | "xml";
+  source: "testrail" | "csv" | "xray" | "xml" | "qase";
   /** CSV and XML: name of the chosen file. */
   fileName: string | null;
   updatedAt: string;
   testrailEndpoint: string;
   /** Xray: Jira project key. */
   xrayProject?: string;
+  /** Qase: project code. */
+  qaseProject?: string;
   testopsEndpoint: string;
   lastRun: RunSummary | null;
 }

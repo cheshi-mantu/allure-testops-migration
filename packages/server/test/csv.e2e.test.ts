@@ -74,7 +74,7 @@ describe("CSV to Allure TestOps migration", () => {
     return (await store.get(profile.id, started.id))!;
   }
 
-  const byTag = (tag: string) => state.testCases.find((tc) => tc.tags.includes(tag))!;
+  const byTag = (tag: string) => state.testCases.find((tc) => tc.tags.includes(tag.toLowerCase()))!;
   const cf = (tc: { cfv: { name: string; customField: { id: number } }[] }, name: string) =>
     tc.cfv.filter((v) => state.customFields.find((f) => f.id === v.customField.id)?.name === name).map((v) => v.name);
 
@@ -214,13 +214,13 @@ describe("CSV to Allure TestOps migration", () => {
     const dry = await run(profile, true);
     const dryProblems = Object.fromEntries((dry.problems ?? []).map((p) => [p.key, p]));
     expect(dryProblems["user:ghost"]).toMatchObject({ code: "user-missing", count: 2, cases: ["Line 2", "Line 3"], fix: { step: "fields", field: "owner" } });
-    expect(dryProblems["status:Weird"]).toMatchObject({ code: "status-missing", count: 2, cases: ["Line 2", "Line 4"], fix: { step: "fields", field: "status" } });
+    expect(dryProblems["status:weird"]).toMatchObject({ code: "status-missing", count: 2, cases: ["Line 2", "Line 4"], fix: { step: "fields", field: "status" } });
 
     const summary = await run(profile);
     expect(summary.counters).toMatchObject({ created: 3, failed: 0 });
     const problems = Object.fromEntries((summary.problems ?? []).map((p) => [p.key, p]));
     expect(problems["user:ghost"]?.cases).toEqual(["Line 2", "Line 3"]);
-    expect(problems["status:Weird"]?.hint).toMatch(/value mapping of the status field/);
+    expect(problems["status:weird"]?.hint).toMatch(/value mapping of the status field/);
     // A warning is logged once, the problem list counts the rest.
     const log = await store.log(profile.id, summary.id);
     expect(log.filter((e) => e.problem === "user:ghost")).toHaveLength(1);

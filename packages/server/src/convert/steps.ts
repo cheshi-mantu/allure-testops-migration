@@ -1,5 +1,6 @@
 import type { PlannedAttachment, PlannedStep } from "@atm/shared";
 import type { TrStep } from "../testrail/types.js";
+import { examplesSink, placeExamples, takeExamples, type ExamplesSink } from "./examples.js";
 import { ATTACHMENT_SCHEME, convertStepText, convertText, tableToCsv, type Table, type TextOptions } from "./markup.js";
 
 export function inlineAttachment(sourceId: string): PlannedAttachment {
@@ -76,17 +77,18 @@ const IMAGE_ONLY_LINE = new RegExp(`^\\s*(!\\[[^\\]]*\\]\\(${ATTACHMENT_SCHEME}[
 
 /**
  * Steps from a plain text field. In `lines` mode every line becomes a step; table blocks and
- * lines holding only images are attached to the step before them.
+ * lines holding only images are attached to the step before them. Tables of Gherkin Examples go
+ * where the sink says, see `convert/examples.ts`.
  */
-export function textSteps(raw: string, mode: "lines" | "single", options: TextOptions): PlannedStep[] {
+export function textSteps(raw: string, mode: "lines" | "single", options: TextOptions, sink: ExamplesSink = examplesSink("attachment")): PlannedStep[] {
   if (raw.trim() === "") {
     return [];
   }
-  if (mode === "single") {
-    return [buildStep(raw, null, null, 1, options)];
-  }
   // Convert once so HTML and TestRail tables become Markdown before splitting into lines.
-  const markdown = convertText(raw, options).text;
+  const { text: markdown, tables } = takeExamples(convertText(raw, options).text);
+  if (mode === "single") {
+    return placeExamples([buildStep(markdown, null, null, 1, { format: "markdown" })], tables, sink);
+  }
   const chunks: string[] = [];
   for (const line of markdown.split("\n")) {
     const previous = chunks.length - 1;
@@ -100,5 +102,9 @@ export function textSteps(raw: string, mode: "lines" | "single", options: TextOp
     chunks.push(line.replace(/^\s*(?:\d+[.)]|[-*•])\s+/, ""));
   }
   // Chunks are Markdown already; convert again only to split tables and images out of the body.
-  return chunks.map((chunk, index) => buildStep(chunk, null, null, index + 1, { format: "markdown" }));
+  return placeExamples(
+    chunks.map((chunk, index) => buildStep(chunk, null, null, index + 1, { format: "markdown" })),
+    tables,
+    sink,
+  );
 }

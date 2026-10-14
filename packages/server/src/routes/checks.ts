@@ -2,6 +2,7 @@ import type { ConnectionCheck, NamedId, Profile } from "@atm/shared";
 import { HttpError } from "../http/httpClient.js";
 import { TestOpsClient } from "../testops/client.js";
 import { TestRailClient } from "../testrail/client.js";
+import { QaseClient } from "../qase/client.js";
 import { JiraClient, XrayClient } from "../xray/client.js";
 
 export interface CheckResult extends ConnectionCheck {
@@ -42,6 +43,24 @@ export async function checkTestRail(profile: Profile): Promise<CheckResult> {
     };
   } catch (error) {
     return { ok: false, message: explain(error, "TestRail"), projects: [] };
+  }
+}
+
+/** Qase API token; returns the projects it can see, with their codes as keys. */
+export async function checkQase(profile: Profile): Promise<CheckResult> {
+  const connection = profile.qase.connection;
+  if (!connection.apiToken) {
+    return { ok: false, message: "Enter the Qase API token.", projects: [] };
+  }
+  try {
+    const projects = await new QaseClient(connection).projects();
+    return {
+      ok: true,
+      message: `Connected to Qase. ${projects.length} project(s) available.`,
+      projects: projects.map((p, index) => ({ id: index + 1, key: p.code, name: `${p.title} (${p.code})` })).sort((a, b) => a.name.localeCompare(b.name)),
+    };
+  } catch (error) {
+    return { ok: false, message: explain(error, "Qase"), projects: [] };
   }
 }
 

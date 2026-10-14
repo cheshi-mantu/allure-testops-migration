@@ -29,6 +29,7 @@ interface TestCase {
   cfv: { name: string; customField: { id: number; name?: string } }[];
   issues: unknown[];
   testKeys: { name: string; integrationId: number }[];
+  examples: { id: number; parameters: { name: string; value: string }[] }[];
   members: unknown[];
   scenario: Step[];
   attachments: Named[];
@@ -259,6 +260,7 @@ export function createTestOpsMock(options: TestOpsMockOptions = {}): { app: Fast
       cfv: [],
       issues: [],
       testKeys: [],
+      examples: [],
       members: [],
       scenario: [],
       attachments: [],
@@ -312,6 +314,12 @@ export function createTestOpsMock(options: TestOpsMockOptions = {}): { app: Fast
     }
     tc.testKeys = keys;
     return keys;
+  });
+  app.get("/api/rs/testcase/:id/example", async (request) => pageOf(testCase(request).examples, request));
+  app.post("/api/rs/testcase/:id/example", async (request) => {
+    const tc = testCase(request);
+    tc.examples = (request.body as { name: string; value: string }[][]).map((parameters) => ({ id: id(), parameters }));
+    return tc.examples;
   });
   app.post("/api/rs/testcase/:id/members", async (request, reply) => {
     const tc = testCase(request);

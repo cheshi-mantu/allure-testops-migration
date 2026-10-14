@@ -1,5 +1,6 @@
 import { mergeSuggestedMappings, type ConnectionCheck, type PlannedAttachment, type PlannedCase, type PlannedNote, type PlannedStep, type Profile, type SourceDiscovery, type SourceFieldInfo, type XmlFilePreview } from "@atm/shared";
 import { ATTACHMENT_SCHEME, looksLikeHtml } from "../convert/markup.js";
+import { examplesSink, stepsWithExamples } from "../convert/examples.js";
 import { note } from "../convert/notes.js";
 import { buildStep } from "../convert/steps.js";
 import { columnFor, groupCases, type CsvCase } from "../csv/cases.js";
@@ -337,6 +338,9 @@ export function transformXmlCase(testCase: XmlCase, profile: Profile, doc: XmlDo
   const names = new Map(namedUrls(testCase.record).filter((entry) => entry.name).map((entry) => [entry.url, entry.name!]));
   planned.links = planned.links.map((link) => (names.has(link.url) ? { ...link, name: names.get(link.url)! } : link));
   const lists = new Set(doc.stepLists.map((list) => list.field));
+  // The transform above collected examples of text it read; scenarios of the file add theirs.
+  const examples = examplesSink(profile.options.gherkinExamples);
+  examples.examples.push(...(planned.examples ?? []));
   for (const mapping of scenarioMappings) {
     let steps: PlannedStep[];
     if (lists.has(mapping.source)) {
@@ -345,7 +349,7 @@ export function transformXmlCase(testCase: XmlCase, profile: Profile, doc: XmlDo
         .filter((step) => step.type !== "step" || step.body || step.expected || step.data);
     } else {
       const text = (testCase.record.values.get(mapping.source) ?? []).join("\n\n");
-      steps = text.trim() ? parseSteps(text, profile.xml.steps) : [];
+      steps = text.trim() ? stepsWithExamples(text, (rest) => parseSteps(rest, profile.xml.steps), examples) : [];
     }
     if (steps.length === 0) {
       continue;
@@ -382,6 +386,9 @@ export function transformXmlCase(testCase: XmlCase, profile: Profile, doc: XmlDo
     planned.notes = notes.filter((entry) => entry.code !== "csv-testrail-images");
   }
   liftStepImages(planned.scenario, xmlFiles);
+  if (examples.examples.length > 0) {
+    planned.examples = examples.examples;
+  }
   return { planned, linkedCaseIds: [] };
 }
 

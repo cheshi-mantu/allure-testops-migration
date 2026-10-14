@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import {
   runContext,
+  QASE_RATE_LIMITS,
   testRailRequestsPerMinute,
   type LogLevel,
   type PlannedCase,
@@ -11,6 +12,7 @@ import {
   type RunSummary,
 } from "@atm/shared";
 import { sharedRateLimiter, type RateLimiter } from "../http/rateLimiter.js";
+import { QASE_WINDOW_MS, QaseClient, qaseRequestsPerWindow } from "../qase/client.js";
 import { TestOpsClient } from "../testops/client.js";
 import { discoverTestOps, requireTestOpsProject } from "../testops/discovery.js";
 import type { RunStore } from "../storage/runs.js";
@@ -168,7 +170,7 @@ export class Run {
       if (this.rateLimit) {
         const { limiter, requests, waitedMs } = this.rateLimit;
         const waited = Math.round((limiter.waitedMs - waitedMs) / 1000);
-        this.log("info", `TestRail API: ${limiter.requests - requests} request(s)${waited > 0 ? `, ${waited}s spent waiting for the rate limit` : ""}.`);
+        this.log("info", `${this.profile.source === "qase" ? "Qase" : "TestRail"} API: ${limiter.requests - requests} request(s)${waited > 0 ? `, ${waited}s spent waiting for the rate limit` : ""}.`);
       }
       this.emitSummary();
       await this.flush();
@@ -213,7 +215,7 @@ export class Run {
     }
     const log = (level: "info" | "warn", message: string, caseId?: string) => this.log(level, message, caseId);
     this.phase(
-      profile.source === "csv" ? "Reading the CSV file" : profile.source === "xml" ? "Reading the XML file" : profile.source === "xray" ? "Connecting to Jira and Xray" : "Connecting to TestRail",
+      profile.source === "csv" ? "Reading the CSV file" : profile.source === "xml" ? "Reading the XML file" : profile.source === "xray" ? "Connecting to Jira and Xray" : profile.source === "qase" ? "Connecting to Qase" : "Connecting to TestRail",
     );
     if (profile.source === "testrail") {
       const perMinute = testRailRequestsPerMinute(profile.testrail.connection);
@@ -225,9 +227,17 @@ export class Run {
         this.log("info", `TestRail rate limit: ${perMinute} requests per minute, shared by everything this tool sends to that TestRail instance.`);
       }
     }
+    if (profile.source === "qase") {
+      const limiter = new QaseClient(profile.qase.connection).rateLimiter;
+      this.rateLimit = { limiter, requests: limiter.requests, waitedMs: limiter.waitedMs };
+      this.log(
+        "info",
+        `Qase rate limit: ${QASE_RATE_LIMITS[profile.qase.connection.rateLimit]} requests per minute for the whole workspace on this plan. The tool sends at most ${qaseRequestsPerWindow(profile.qase.connection)} every ${QASE_WINDOW_MS / 1000} seconds, and waits as long as Qase asks when it still answers "too many requests".`,
+      );
+    }
     const retryLog = (service: string) => (info: RetryInfo) =>
       this.log("warn", `${service}: ${info.url} failed (${info.reason}); retry ${info.attempt} of ${info.of} in ${Math.max(1, Math.round(info.delayMs / 1000))}s.`);
-    const source = await prepareSource(profile, this.deps, log, retryLog(profile.source === "xray" ? "Jira or Xray" : "TestRail"));
+    const source = await prepareSource(profile, this.deps, log, retryLog(profile.source === "xray" ? "Jira or Xray" : profile.source === "qase" ? "Qase" : "TestRail"));
 
     this.phase("Connecting to Allure TestOps");
     const projectId = requireTestOpsProject(profile);
@@ -605,6 +615,8 @@ function sourceLabelOf(profile: Profile): string {
       return "CSV file";
     case "xml":
       return "XML file";
+    case "qase":
+      return `Qase project ${profile.qase.scope.projectCode || "?"}`;
     case "xray": {
       const jql = profile.xray.scope.jql.trim();
       return `Xray project ${profile.xray.scope.projectKey || "?"}${jql ? ` (${jql})` : ""}`;
@@ -624,6 +636,7 @@ function describePlan(planned: PlannedCase): string {
   if (fieldValues) parts.push(`${fieldValues} custom field value(s)`);
   if (planned.tags.length > 1) parts.push(`${planned.tags.length - 1} tag(s)`);
   if (planned.issues.length) parts.push(`${planned.issues.length} issue(s)`);
+  if (planned.examples?.length) parts.push(`${planned.examples.length} example(s)`);
   if (planned.testKeys?.length) parts.push(`test key ${planned.testKeys.map((k) => k.key).join(", ")}`);
   if (planned.links.length) parts.push(`${planned.links.length} link(s)`);
   if (planned.owner) parts.push(`owner ${planned.owner}`);

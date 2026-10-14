@@ -44,6 +44,7 @@ const TARGET_LABELS: Record<FieldTargetKind, string> = {
   owner: "Owner",
   link: "Links",
   attachment: "Attachments (files by their address)",
+  examples: "Examples of the test case (parameter sets)",
   issue: "Issues",
   description: "Description",
   precondition: "Precondition",
@@ -190,6 +191,7 @@ function FieldsEditor() {
   const unit = xml ? "field" : "column";
   const nameColumns = profile.fields.filter((m) => m.target.kind === "name").map((m) => m.source);
   const xray = profile.source === "xray";
+  const qase = profile.source === "qase";
   const longText = (f: TestRailFieldInfo) => ["text", "steps", "url"].includes(f.kind);
   const groups: { title: string; hint: string; fields: TestRailFieldInfo[] }[] = csv
     ? [
@@ -237,7 +239,7 @@ function FieldsEditor() {
     },
     {
       title: "Fields with a list of values",
-      hint: "Each value can be renamed or skipped. Values not listed in the mapping keep their TestRail name.",
+      hint: `Each value can be renamed or skipped. Values not listed in the mapping keep their ${qase ? "Qase" : "TestRail"} name.`,
       fields: visible.filter((f) => f.options !== null && !longText(f)),
     },
     {
@@ -256,7 +258,9 @@ function FieldsEditor() {
             ? `Choose where each ${unit} goes. Examples and counts come from all ${discovery.sampledCases} case(s) of the file.`
             : xray
               ? `Choose where each attribute of the Xray tests goes: Xray details and every Jira field used by the tests. Examples and counts come from ${discovery.sampledCases} sampled test(s).`
-              : `Choose where each TestRail field goes. Examples and counts come from ${discovery.sampledCases} sampled case(s) of the selected suites.`}
+              : qase
+                ? `Choose where each attribute of the Qase cases goes: system fields, tags, parameters and the custom fields of the project. Examples and counts come from ${discovery.sampledCases} sampled case(s).`
+                : `Choose where each TestRail field goes. Examples and counts come from ${discovery.sampledCases} sampled case(s) of the selected suites.`}
         </Text>
         <RefreshButton />
       </Group>
@@ -360,7 +364,7 @@ function FieldRow({
               </Tooltip>
             )}
             {!field.system && field.kind !== "column" && !xml && (
-              <Tooltip label={profile.source === "xray" ? "Custom field in Jira" : "Custom field in TestRail"}>
+              <Tooltip label={profile.source === "xray" ? "Custom field in Jira" : profile.source === "qase" ? "Custom field in Qase" : "Custom field in TestRail"}>
                 <Badge size="xs" variant="dot" color="gray">
                   custom
                 </Badge>
@@ -385,6 +389,10 @@ function FieldRow({
           </Text>
           {field.examples.length > 0 && (
             <Stack gap={2} mt={6}>
+              <Text size="xs" c="dimmed">
+                {field.examples.length > 1 ? `Examples from different ${field.kind === "column" && profile.source === "csv" ? "rows" : "cases"}` : "Example"}
+                {field.examples.some((example) => example.includes("↵")) ? ", ↵ is a line break inside a value:" : ":"}
+              </Text>
               {field.examples.map((example) => (
                 <Text key={example} size="xs" lineClamp={2} className="mono">
                   “{example}”
@@ -457,6 +465,12 @@ function FieldRow({
               />
             )}
             {target.kind === "scenario" && field.kind === "column" && <StepFormatSettings />}
+            {target.kind === "examples" && (
+              <Text size="xs" c="dimmed">
+                Every combination of the parameter values becomes an example of the case; parameters of a group change together. More than 100
+                combinations stay in the description as text.
+              </Text>
+            )}
             {target.kind === "attachment" && (
               <Text size="xs" c="dimmed">
                 {profile.xml.files.download
@@ -478,7 +492,7 @@ function FieldRow({
             {(field.options === null || field.kind === "column") && SPLIT_TARGETS.includes(target.kind) && (
               <TextInput
                 label="Split values by"
-                description="E.g. a comma for “ABC-1, ABC-2”. Leave empty to keep one value."
+                description="E.g. a comma for “ABC-1, ABC-2”, or \n for a value per line. Leave empty to keep one value."
                 w={260}
                 value={mapping.separator}
                 onChange={(e) => {
@@ -621,7 +635,7 @@ function ValueTable({
     <Table mt="sm" verticalSpacing={4}>
       <Table.Thead>
         <Table.Tr>
-          <Table.Th>{profile.source === "csv" ? "CSV value" : profile.source === "xml" ? "Value in the file" : profile.source === "xray" ? "Jira or Xray value" : "TestRail value"}</Table.Th>
+          <Table.Th>{profile.source === "csv" ? "CSV value" : profile.source === "xml" ? "Value in the file" : profile.source === "xray" ? "Jira or Xray value" : profile.source === "qase" ? "Qase value" : "TestRail value"}</Table.Th>
           <Table.Th w={90}>In sample</Table.Th>
           <Table.Th w="45%">Allure TestOps value</Table.Th>
           <Table.Th w={90}>Skip</Table.Th>

@@ -65,6 +65,7 @@ export type Operation =
   | "set test keys"
   | "set members"
   | "add comments"
+  | "set the examples"
   | "upload attachments"
   | "set the scenario"
   | "migrate a shared step"
@@ -133,12 +134,13 @@ export interface ExplainContext {
   service: Service;
 }
 
-export type Service = "Allure TestOps" | "TestRail" | "Jira" | "Xray";
+export type Service = "Allure TestOps" | "TestRail" | "Jira" | "Xray" | "Qase";
 
 const CREDENTIAL_HINTS: Record<Service, string> = {
   TestRail: "The user email or API key is wrong, or the API key was deleted. Create a new API key in TestRail (My Settings, API Keys) and enter it on the Connections step.",
   "Allure TestOps": "The API token is wrong, expired or was revoked. Create a new token in Allure TestOps (your profile, API tokens) and enter it on the Connections step.",
   Jira: "The email or API token is wrong, or the token was revoked. Create an API token for the Atlassian account (id.atlassian.com, Security, API tokens) and enter it on the Connections step.",
+  Qase: "The API token is wrong or was revoked. Create a new token in Qase (your profile, API tokens) and enter it on the Connections step.",
   Xray: "The Xray API key (client id and secret) is wrong or was revoked, or the region does not match the Jira site. Create an API key in Jira (Apps, Xray, API Keys) and enter it on the Connections step.",
 };
 
@@ -193,8 +195,10 @@ export function explain(error: unknown, operation: Operation, context: ExplainCo
       hint:
         service === "TestRail"
           ? "Check that the TestRail API is enabled (Administration, Site Settings, API) and that the user can read the project."
-          : service === "Jira" || service === "Xray"
-            ? "The Jira user must be able to browse the project, its issues and attachments. Ask a Jira administrator for the Browse projects permission in this project."
+          : service === "Qase"
+            ? "The role of the Qase user who owns the API token must be able to read the project, its test cases and shared steps. Ask a Qase administrator, or use the token of another user."
+            : service === "Jira" || service === "Xray"
+              ? "The Jira user must be able to browse the project, its issues and attachments. Ask a Jira administrator for the Browse projects permission in this project."
             : `Use the token of a user who can edit test cases in project #${project}, or ask a project administrator to grant that permission.${operation === "create a custom field" || operation === "create the tree" ? " Creating custom fields and trees needs project or instance administrator rights." : ""}`,
       fix: connections,
       detail,
@@ -320,6 +324,9 @@ export function serviceOf(error: unknown, profile: Profile): Service {
     const startsWith = (base: string) => Boolean(base) && cause.url.startsWith(base.replace(/\/+$/, ""));
     if (profile.source === "testrail" && startsWith(profile.testrail.connection.endpoint)) {
       return "TestRail";
+    }
+    if (profile.source === "qase" && !startsWith(profile.testops.connection.endpoint)) {
+      return "Qase";
     }
     if (profile.source === "xray" && !startsWith(profile.testops.connection.endpoint)) {
       if (/getxray\.app|\/api\/v\d+\/(?:graphql|authenticate|attachments?)/.test(cause.url)) {

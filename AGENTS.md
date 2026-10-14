@@ -53,6 +53,7 @@ packages/
   server/src/testops/       Allure TestOps client and project discovery
   server/src/testrail/      TestRail client, discovery, field and section handling
   server/src/xray/          Xray Cloud (GraphQL) and Jira Cloud (REST v3) clients, field catalog, wiki markup, transform, discovery
+  server/src/qase/          Qase REST v1 client paced for the workspace rate limit, field catalog, transform, files and shared steps, discovery
   server/src/csv/           CSV reading, column suggestions, grouping rows into cases, step parsing, transform
   server/src/xml/           generic XML reading (read.ts) and the XML source on top of the CSV table model (source.ts)
   server/src/convert/       TestRail case to PlannedCase (pure), text and markup conversion
@@ -136,10 +137,11 @@ The order matters: the case must become findable (tags) before anything else can
 5. **Custom fields:** `POST api/rs/testcase/{id}/cfv` with `[{ "name": "Checkout", "customField": { "id": 12 } }]`. This replaces all values of the case: read `GET api/rs/testcase/{id}/cfv` first and send back the values of fields the migration does not manage.
 6. **Issues:** `POST api/rs/testcase/{id}/issue` with `[{ "name": "ABC-123", "integrationId": 1 }]`. Only with an enabled integration of the project.
 7. **Test keys** (keys of the case in a test management system connected through an integration): `GET api/rs/testcase/{id}/testkey`, then `POST api/rs/testcase/{id}/testkey` with `[{ "name": "CALC-12", "integrationId": 2 }]`. This replaces all test keys of the case: send back the keys of other integrations.
-8. **Owner and members:** `POST api/rs/testcase/{id}/members` with `[{ "name": "jane", "role": { "id": -1 } }, { "name": "sam", "role": { "id": 2 } }]`. Role id `-1` is the owner. This replaces the list. An unknown user fails the whole request: on failure, retry adding members one by one to keep the valid ones and report the rest.
-9. **Comments:** `GET api/rs/comment?testCaseId=` then `POST api/rs/comment` with `{ "testCaseId": 1, "body": "..." }` only for bodies not present yet.
-10. **Attachments:** `GET api/rs/testcase/attachment?testCaseId=` then `POST api/rs/testcase/attachment?testCaseId=` (multipart, field `file`), only for file names not present yet. The answer is an array with the uploaded attachment.
-11. **Scenario:** remove the old steps (`GET api/rs/testcase/{id}/step`, then `DELETE api/rs/testcase/step/{stepId}` for each id in `root.children`), then `POST api/rs/testcase/{id}/scenario?v2=true` with `{ "steps": [...] }`.
+8. **Examples** (sets of parameter values the case runs with): `POST api/rs/testcase/{id}/example` with `[[{ "name": "browser", "value": "chrome" }, { "name": "user", "value": "admin" }], ...]` replaces all examples of the case; `GET` the same path lists them, paged. The web app uses this path too. A source sets `PlannedCase.examples`; tables of Gherkin Examples go through `convert/examples.ts`, which follows the `gherkinExamples` option.
+9. **Owner and members:** `POST api/rs/testcase/{id}/members` with `[{ "name": "jane", "role": { "id": -1 } }, { "name": "sam", "role": { "id": 2 } }]`. Role id `-1` is the owner. This replaces the list. An unknown user fails the whole request: on failure, retry adding members one by one to keep the valid ones and report the rest.
+10. **Comments:** `GET api/rs/comment?testCaseId=` then `POST api/rs/comment` with `{ "testCaseId": 1, "body": "..." }` only for bodies not present yet.
+11. **Attachments:** `GET api/rs/testcase/attachment?testCaseId=` then `POST api/rs/testcase/attachment?testCaseId=` (multipart, field `file`), only for file names not present yet. The answer is an array with the uploaded attachment.
+12. **Scenario:** remove the old steps (`GET api/rs/testcase/{id}/step`, then `DELETE api/rs/testcase/step/{stepId}` for each id in `root.children`), then `POST api/rs/testcase/{id}/scenario?v2=true` with `{ "steps": [...] }`.
 
 Scenario step objects:
 
@@ -171,7 +173,7 @@ Step bodies are plain text; `description`, `precondition`, `expectedResult` and 
 
 ### Reruns and idempotency
 
-- Mark every migrated case with the tag `<prefix>:<sourceId>`. The prefix must be required and per source (two files numbered 1, 2, 3 must not collide in one project). The prefix `testrail` matches the earlier TestRail migration tool, so its cases are updated, not duplicated.
+- Mark every migrated case with the tag `<prefix>:<sourceId>`, in lower case like every tag the tool writes. `normalizePlanned` (`shared/src/normalize.ts`) is applied to every planned case of every source before the dry run, the migration and the preview: it trims every value and writes tags, the layer and the status in lower case. The writer also finds cases tagged before in the source's spelling. The prefix must be required and per source (two files numbered 1, 2, 3 must not collide in one project). The prefix `testrail` matches the earlier TestRail migration tool, so its cases are updated, not duplicated.
 - Find before create. After a failed step, reuse the id created earlier in the run instead of searching by tag (the tag may not be set yet).
 - Replace lists that the API replaces (tags, members, scenario); merge what belongs to the user (custom field values of unmanaged fields); add only missing comments and attachments.
 - Text that links to other source cases can be resolved only after those cases exist: collect such cases and rewrite them in a last pass.
@@ -212,4 +214,5 @@ The XML source is generic on purpose: there are no presets per tool. `xml/read.t
 - `createTestOpsMock()` from `@atm/mocks` serves the subset of the Allure TestOps API listed above and keeps its state in memory (`state.testCases`, `state.customFields`, ...). Options: `latencyMs`, `rejectedCustomFieldValues` (400 for these values), `failures` (answer matching requests with 500 or with an HTML page a given number of times).
 - An end-to-end test for a source should: migrate a synthetic project, check the written cases field by field, run again and expect only updates, and run once with injected failures expecting no duplicates.
 - `createXrayMock()` serves Jira Cloud REST v3 and the Xray Cloud GraphQL API on one port, with a project of Manual, Cucumber and Generic tests, a called test, folders, preconditions, sets, plans, comments, links and attachments. Search pages hold two issues, so paging is always exercised.
-- Test the UI against the fake servers (`npm run dev:mocks` and `npm run dev:server`): fake TestRail user `demo@example.com` with API key `demo-api-key`, fake Allure TestOps token `demo-api-token`, fake Jira and Xray on port 4003 (`demo@example.com` / `demo-jira-token`, Xray `demo-client-id` / `demo-client-secret`).
+- Test the UI against the fake servers (`npm run dev:mocks` and `npm run dev:server`): fake TestRail user `demo@example.com` with API key `demo-api-key`, fake Allure TestOps token `demo-api-token`, fake Jira and Xray on port 4003 (`demo@example.com` / `demo-jira-token`, Xray `demo-client-id` / `demo-client-secret`). Fake Qase on port 4004 with the token `demo-qase-token`.
+- `createQaseMock()` serves the Qase REST API v1 the migration and `dev/qase-seed.ts` use, reads and writes, with a project DEMO (suites three levels deep, classic and Gherkin cases, a shared step, nested steps, parameters, custom fields, files served from another origin than the API). Options: `pageSize` (small values exercise paging) and `rateLimit` (429 with Retry-After).

@@ -261,6 +261,11 @@ export class TestOpsClient {
     return this.http.json("POST", `api/rs/testcase/${testCaseId}/testkey`, { body: keys });
   }
 
+  /** Replaces the examples of a test case: sets of parameter values the case runs with. */
+  setExamples(testCaseId: number, examples: { name: string; value: string }[][]): Promise<unknown> {
+    return this.http.json("POST", `api/rs/testcase/${testCaseId}/example`, { body: examples });
+  }
+
   /** Replaces the members of a test case. Role -1 is the owner role. */
   setMembers(testCaseId: number, members: { name: string; role: { id: number } }[]): Promise<unknown> {
     return this.http.json("POST", `api/rs/testcase/${testCaseId}/members`, { body: members });

@@ -1,6 +1,7 @@
 import type { FieldMapping, PlannedAttachment, PlannedCase, PlannedNote, PlannedStep, Profile, TextTarget } from "@atm/shared";
-import { mapSectionPath } from "@atm/shared";
+import { mapSectionPath, splitValue } from "@atm/shared";
 import { note } from "../convert/notes.js";
+import { examplesSink, type ExamplesSink } from "../convert/examples.js";
 import { buildStep, inlineAttachment, textSteps } from "../convert/steps.js";
 import { migrationTag } from "../convert/transform.js";
 import { folderLevels, XrayCatalog } from "./catalog.js";
@@ -57,7 +58,7 @@ export function mappedXrayValues(testCase: XrayCase, mapping: FieldMapping, cata
     return result;
   }
   for (const label of value.labels) {
-    for (const part of mapping.separator ? label.split(mapping.separator) : [label]) {
+    for (const part of splitValue(label, mapping.separator)) {
       const key = part.trim();
       push(Object.hasOwn(mapping.values, key) ? mapping.values[key] : key);
     }
@@ -119,8 +120,8 @@ export function xraySteps(steps: XrayStep[], context: XrayContext, useSharedStep
 }
 
 /** A Cucumber scenario as steps, one per line; Examples tables stay with the line before them. */
-function gherkinSteps(gherkin: string): PlannedStep[] {
-  return textSteps(gherkin.replace(/^\s*#.*$/gm, ""), "lines", MARKDOWN);
+function gherkinSteps(gherkin: string, examples: ExamplesSink): PlannedStep[] {
+  return textSteps(gherkin.replace(/^\s*#.*$/gm, ""), "lines", MARKDOWN, examples);
 }
 
 /**
@@ -133,6 +134,7 @@ export function transformXrayCase(testCase: XrayCase, context: XrayContext): Xra
   const options = profile.options;
   const notes: PlannedNote[] = [];
   const inlineIds = new Set<string>();
+  const examples = examplesSink(options.gherkinExamples);
   const url = `${context.jiraBase}browse/${issue.key}`;
 
   const planned: PlannedCase = {
@@ -275,13 +277,13 @@ export function transformXrayCase(testCase: XrayCase, context: XrayContext): Xra
           steps = xraySteps(test.steps ?? [], context, options.migrateSharedSteps);
         } else if (mapping.source === "xray:definition") {
           steps = test.gherkin?.trim()
-            ? gherkinSteps(test.gherkin)
+            ? gherkinSteps(test.gherkin, examples)
             : test.unstructured?.trim()
-              ? textSteps(wikiToStepText(test.unstructured), options.textSteps, MARKDOWN)
+              ? textSteps(wikiToStepText(test.unstructured), options.textSteps, MARKDOWN, examples)
               : [];
         } else {
           const text = catalog.text(testCase, mapping.source);
-          steps = text ? textSteps(text, options.textSteps, MARKDOWN) : [];
+          steps = text ? textSteps(text, options.textSteps, MARKDOWN, examples) : [];
         }
         if (steps.length === 0) {
           break;
@@ -301,6 +303,9 @@ export function transformXrayCase(testCase: XrayCase, context: XrayContext): Xra
   planned.precondition = texts.precondition.join("\n\n");
   planned.expectedResult = texts.expectedResult.join("\n\n");
   planned.attachments = [...inlineIds].map(inlineAttachment);
+  if (examples.examples.length > 0) {
+    planned.examples = examples.examples;
+  }
 
   // Content of the test that no mapping takes: say so, with the place to fix it.
   const unmapped = (source: string, what: string) => {
