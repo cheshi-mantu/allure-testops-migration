@@ -19,6 +19,40 @@ Open <http://localhost:8080>, create a profile and follow the steps.
 
 Profiles and run logs are stored in the `migration-data` Docker volume. Use **Export to JSON** in the profile menu to move a profile to another machine and **Import** on the start page to load it. Credentials are left out of exports unless you tick *Include credentials*.
 
+### Without Docker
+
+You need Node.js 22.12 or later with npm, and git.
+
+```bash
+git clone https://github.com/cheshi-mantu/allure-testops-migration.git
+cd allure-testops-migration
+npm ci
+npm run build
+HOST=127.0.0.1 npm start
+```
+
+Open <http://localhost:8080>. Profiles, uploaded files and run logs are kept in the `.data` folder of the directory you start from. `npm start` runs in the foreground: stop it with Ctrl+C, start it again with the same command, and the profiles are still there.
+
+The tool has no login, so `HOST=127.0.0.1` keeps it reachable from this computer only; without it the tool listens on every network interface. Other settings, also as environment variables:
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `PORT` | `8080` | Port of the UI and the API |
+| `HOST` | `0.0.0.0` | Address to listen on |
+| `DATA_DIR` | `./.data` | Folder for profiles, files and run logs |
+| `LOG_LEVEL` | `info` | Server log level: `debug`, `info`, `warn` or `error` |
+
+On Windows (PowerShell) set them before starting, for example `$env:HOST="127.0.0.1"; $env:PORT="9000"; npm start`.
+
+To update, stop the tool, then:
+
+```bash
+git pull
+npm ci
+npm run build
+HOST=127.0.0.1 npm start
+```
+
 ## What you need
 
 - **TestRail**: the URL, a user email and an API key (*My Settings → API Keys*). The API must be enabled in *Administration → Site Settings → API*. Read access to the project is enough.
