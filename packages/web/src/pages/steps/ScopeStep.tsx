@@ -68,6 +68,7 @@ export function ScopeStep() {
       <SimpleGrid cols={{ base: 1, lg: isFileSource(profile.source) ? 1 : 2 }} maw={isFileSource(profile.source) ? 640 : undefined}>
         {profile.source === "xray" && <XrayScopeCard onChange={invalidateDiscovery} />}
         {profile.source === "qase" && <QaseScopeCard onChange={invalidateDiscovery} />}
+        {profile.source === "alm" && <AlmScopeCard onChange={invalidateDiscovery} />}
         {profile.source === "testrail" && (
         <Card withBorder>
           <Stack>
@@ -424,6 +425,104 @@ function QaseScopeCard({ onChange }: { onChange: () => void }) {
           onChange={(values) => {
             const ids = values.map((value) => Number(/(\d+)\s*$/.exec(value)?.[1])).filter((id) => Number.isInteger(id) && id > 0);
             update((p) => void (p.qase.scope.caseIds = [...new Set(ids)]));
+            onChange();
+          }}
+        />
+      </Stack>
+    </Card>
+  );
+}
+
+/** ALM domain and project, optionally some Test Plan folders, and an optional list of tests for a trial run. */
+function AlmScopeCard({ onChange }: { onChange: () => void }) {
+  const { profile, update, flush } = useProfile();
+  const scope = profile.alm.scope;
+  const projects = useQuery({
+    queryKey: ["projects", "alm", profile.id],
+    queryFn: async () => {
+      await flush();
+      const result = await api.checkAlm(profile.id);
+      if (!result.ok) {
+        throw new Error(result.message);
+      }
+      return result.projects;
+    },
+  });
+  const folders = useQuery({
+    queryKey: ["folders", "alm", profile.id, scope.domain, scope.project],
+    queryFn: async () => {
+      await flush();
+      return api.almFolders(profile.id);
+    },
+    enabled: Boolean(scope.domain && scope.project),
+  });
+  // A domain and a project in one value of the list.
+  const valueOf = (domain: string, project: string) => JSON.stringify([domain, project]);
+  useEffect(() => {
+    const only = projects.data?.length === 1 ? projects.data[0]! : null;
+    if (only?.key && !scope.project) {
+      update((p) => {
+        p.alm.scope.domain = only.key!;
+        p.alm.scope.project = only.name;
+      });
+    }
+  }, [projects.data, scope.project, update]);
+  const domains = [...new Set((projects.data ?? []).map((p) => p.key ?? ""))];
+  const current = scope.domain && scope.project ? valueOf(scope.domain, scope.project) : null;
+
+  return (
+    <Card withBorder>
+      <Stack>
+        <Title order={4}>From ALM</Title>
+        {projects.error && <Alert color="red">{errorText(projects.error)}</Alert>}
+        <Select
+          label="Project"
+          description="Projects of the domains the user can open."
+          placeholder={projects.isLoading ? "Loading…" : "Choose a project"}
+          rightSection={projects.isLoading ? <Loader size={14} /> : undefined}
+          searchable
+          data={[
+            ...domains.map((domain) => ({
+              group: domain,
+              items: (projects.data ?? []).filter((p) => p.key === domain).map((p) => ({ value: valueOf(domain, p.name), label: p.name })),
+            })),
+            ...(current && !projects.data?.some((p) => p.key === scope.domain && p.name === scope.project) ? [{ value: current, label: `${scope.domain} / ${scope.project}` }] : []),
+          ]}
+          value={current}
+          onChange={(value) => {
+            const [domain, project] = value ? (JSON.parse(value) as [string, string]) : ["", ""];
+            update((p) => {
+              p.alm.scope.domain = domain;
+              p.alm.scope.project = project;
+              p.alm.scope.folderIds = [];
+              p.alm.scope.testIds = [];
+            });
+            onChange();
+          }}
+        />
+        {folders.error && <Alert color="red">{errorText(folders.error)}</Alert>}
+        <MultiSelect
+          label="Test Plan folders (optional)"
+          description="Only the tests of these folders and of the folders inside them. Leave empty for the whole Test Plan."
+          placeholder={folders.isLoading ? "Loading…" : scope.folderIds.length ? undefined : "All folders"}
+          searchable
+          clearable
+          disabled={!scope.project}
+          data={(folders.data ?? []).map((folder) => ({ value: String(folder.id), label: folder.name }))}
+          value={scope.folderIds.map(String)}
+          onChange={(values) => {
+            update((p) => void (p.alm.scope.folderIds = values.map(Number)));
+            onChange();
+          }}
+        />
+        <TagsInput
+          label="Only these tests (optional)"
+          description="Test ids as ALM shows them, e.g. 12, useful for a trial migration. Leave empty for everything."
+          placeholder="Type an id and press Enter"
+          value={scope.testIds.map(String)}
+          onChange={(values) => {
+            const ids = values.map((value) => Number(/(\d+)\s*$/.exec(value)?.[1])).filter((id) => Number.isInteger(id) && id > 0);
+            update((p) => void (p.alm.scope.testIds = [...new Set(ids)]));
             onChange();
           }}
         />

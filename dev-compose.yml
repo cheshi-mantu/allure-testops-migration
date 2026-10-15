@@ -8,6 +8,7 @@
 #   Allure TestOps  http://mocks:4002   API token demo-api-token
 #   Jira and Xray   http://mocks:4003   for both URLs; Jira demo@example.com / demo-jira-token, Xray demo-client-id / demo-client-secret
 #   Qase            http://mocks:4004   API token demo-qase-token (the Qase API address on the Connections step)
+#   ALM             http://mocks:4005   user demo / demo-password, or API key demo-client / demo-secret; domain DEFAULT, project Banking
 
 services:
   app:
@@ -32,6 +33,7 @@ services:
       - "127.0.0.1:4002:4002"
       - "127.0.0.1:4003:4003"
       - "127.0.0.1:4004:4004"
+      - "127.0.0.1:4005:4005"
 
   tests:
     build:

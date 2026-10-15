@@ -31,9 +31,11 @@ import { explain, KnownProblem, OperationFailed, serviceOf } from "../engine/pro
 import { HttpError } from "../http/httpClient.js";
 import { prepareSource } from "../engine/sources.js";
 import type { FileStore } from "../storage/fileStore.js";
-import { checkQase, checkTestOps, checkTestRail, checkXray } from "./checks.js";
+import { checkAlm, checkQase, checkTestOps, checkTestRail, checkXray } from "./checks.js";
 import { discoverFromTestOps, fromTestOpsContext, readTestCase, sourceClient, wantedByType } from "../fromtestops/source.js";
 import { transformTestOpsCase } from "../fromtestops/transform.js";
+import { discoverAlm, folderChoices, loadAlmContext, parseAlmTestId, readAlmTest } from "../alm/discovery.js";
+import { transformAlmTest } from "../alm/transform.js";
 import { discoverQase, loadQaseContext, parseQaseCaseId, readQaseCase } from "../qase/discovery.js";
 import { QaseClient } from "../qase/client.js";
 import { suitePath, transformQaseCase } from "../qase/transform.js";
@@ -121,6 +123,7 @@ export async function registerApi(app: FastifyInstance, deps: ApiDeps): Promise<
         testrailEndpoint: profile.testrail.connection.endpoint,
         xrayProject: profile.xray.scope.projectKey,
         qaseProject: profile.qase.scope.projectCode,
+        almProject: profile.alm.scope.project ? `${profile.alm.scope.domain} / ${profile.alm.scope.project}` : "",
         testopsProjects: profile.testopsSource.projects.map((p) => p.sourceName),
         testopsEndpoint: profile.testops.connection.endpoint,
         lastRun: (await runs.list(profile.id))[0] ?? null,
@@ -195,6 +198,20 @@ export async function registerApi(app: FastifyInstance, deps: ApiDeps): Promise<
   app.post<{ Params: { id: string } }>("/api/profiles/:id/testops/check", async (request) => checkTestOps(await load(request.params.id)));
   app.post<{ Params: { id: string } }>("/api/profiles/:id/xray/check", async (request) => checkXray(await load(request.params.id)));
   app.post<{ Params: { id: string } }>("/api/profiles/:id/qase/check", async (request) => checkQase(await load(request.params.id)));
+  app.post<{ Params: { id: string } }>("/api/profiles/:id/alm/check", async (request) => checkAlm(await load(request.params.id)));
+  /** Test Plan folders of the chosen ALM project with their full paths, to narrow a migration. */
+  app.get<{ Params: { id: string } }>("/api/profiles/:id/alm/folders", async (request) => {
+    const profile = await load(request.params.id);
+    if (!profile.alm.scope.domain || !profile.alm.scope.project) {
+      return [];
+    }
+    const context = await loadAlmContext(profile);
+    try {
+      return folderChoices(context.folders);
+    } finally {
+      await context.client.logout();
+    }
+  });
   /** The source Allure TestOps: the same check as for the target, with the source connection. */
   app.post<{ Params: { id: string } }>("/api/profiles/:id/testops-source/check", async (request) => {
     const profile = await load(request.params.id);
@@ -259,6 +276,8 @@ export async function registerApi(app: FastifyInstance, deps: ApiDeps): Promise<
         return discoverXray(profile);
       case "qase":
         return discoverQase(profile);
+      case "alm":
+        return discoverAlm(profile);
       case "testops":
         return discoverFromTestOps(profile);
       default:
@@ -393,6 +412,20 @@ export async function registerApi(app: FastifyInstance, deps: ApiDeps): Promise<
       context.assets.learn([testCase]);
       const { planned, linkedCaseIds } = transformQaseCase(testCase, context);
       return { ...normalizePlanned(planned), linkedCaseIds };
+    }
+    if (profile.source === "alm") {
+      const context = await loadAlmContext(profile);
+      try {
+        const id = parseAlmTestId(rawId);
+        const test = id === null ? null : await readAlmTest(context, id);
+        if (!test) {
+          throw Object.assign(new Error(`"${rawId}" is not a test of ALM project ${context.domain} / ${context.project}.`), { statusCode: 404 });
+        }
+        const { planned, linkedCaseIds } = transformAlmTest(test, context);
+        return { ...normalizePlanned(planned), linkedCaseIds };
+      } finally {
+        await context.client.logout();
+      }
     }
     if (profile.source === "xray") {
       const context = await loadXrayContext(profile);

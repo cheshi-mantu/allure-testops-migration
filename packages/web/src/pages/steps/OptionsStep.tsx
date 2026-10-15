@@ -20,6 +20,7 @@ export function OptionsStep() {
   const xml = profile.source === "xml";
   const xray = profile.source === "xray";
   const qase = profile.source === "qase";
+  const alm = profile.source === "alm";
   const testrail = profile.source === "testrail";
   /** Another Allure TestOps: text is Markdown on both sides and moves as it is. */
   const copy = profile.source === "testops";
@@ -40,24 +41,26 @@ export function OptionsStep() {
                 ? `Every case gets the tag "${prefixShown}:<case id>". Reruns find cases by this tag and update them.`
                 : copy
                   ? `Every case gets the tag "${prefixShown}:<id of the case in the source>", e.g. "${prefixShown}:12344". Reruns find cases by this tag and update them.`
+                  : alm
+                  ? `Every case gets the tag "${prefixShown}:<test id>", e.g. "${prefixShown}:1024". Reruns find cases by this tag and update them.`
                   : qase
                   ? `Every case gets the tag "${prefixShown}:<project code>-<case id>", e.g. "${prefixShown}:demo-12". Reruns find cases by this tag and update them.`
                   : xray
                   ? `Every case gets the tag "${prefixShown}:<issue key>", e.g. "${prefixShown}:calc-12". Reruns find cases by this tag and update them.`
                   : `Every case gets the tag "${prefixShown}:<TestRail id>". Reruns find cases by this tag and update them. Keep "testrail" to continue a migration made with the previous migration tool.`
             }
-            placeholder={xml ? "e.g. xml-regression" : csv ? "e.g. csv-regression" : xray ? "xray" : qase ? "qase" : copy ? "old_id" : "testrail"}
+            placeholder={xml ? "e.g. xml-regression" : csv ? "e.g. csv-regression" : xray ? "xray" : qase ? "qase" : alm ? "alm" : copy ? "old_id" : "testrail"}
             value={options.migrationTagPrefix}
             error={prefixMissing ? "Enter a prefix. Without it migrated cases cannot be found again, so the migration cannot start." : undefined}
             onChange={(e) => set("migrationTagPrefix", e.currentTarget.value.trim())}
           />
           <TextInput
             label="Additional tag"
-            description={`Optional tag added to every migrated case, e.g. “from-${xray ? "xray" : qase ? "qase" : xml ? "xml" : csv ? "csv" : "testrail"}”.`}
+            description={`Optional tag added to every migrated case, e.g. “from-${xray ? "xray" : qase ? "qase" : alm ? "alm" : xml ? "xml" : csv ? "csv" : "testrail"}”.`}
             value={options.additionalTag}
             onChange={(e) => set("additionalTag", e.currentTarget.value)}
           />
-          {!csv && (
+          {!csv && !alm && (
           <Switch
             label={xray ? "Link back to the Jira issue" : qase ? "Link back to the Qase case" : copy ? "Link back to the case in the source Allure TestOps" : "Link back to the TestRail case"}
             description={xray ? "A link named after the issue key, e.g. \"Jira CALC-12\", in the Links of the case." : qase ? "A link named after the case, e.g. \"Qase DEMO-12\", in the Links of the case." : undefined}
@@ -100,7 +103,7 @@ export function OptionsStep() {
               Text is Markdown in both Allure TestOps instances and is copied as it is; images in text point to the copied files.
             </Text>
           )}
-          {!xray && !copy && (
+          {!xray && !copy && !alm && (
           <Radio.Group
             label={csv ? "Text format" : qase ? "Qase text format" : "TestRail text format"}
             description={xml ? "Text in the file may be Markdown or HTML." : csv ? "Text cells may hold Markdown or HTML." : qase ? "Qase keeps text as Markdown; text written in an older editor may be HTML." : "Newer TestRail versions store HTML; older ones use Markdown."}
@@ -113,6 +116,11 @@ export function OptionsStep() {
               <Radio value="html" label="HTML" />
             </Stack>
           </Radio.Group>
+          )}
+          {alm && (
+            <Text size="sm" c="dimmed">
+              ALM rich text is converted to Markdown; pictures in it, kept by ALM as attachments of the test or step, become attachments of the case. Test parameters such as &lt;&lt;&lt;amount&gt;&gt;&gt; stay in the text as they are.
+            </Text>
           )}
           {xray && (
             <Text size="sm" c="dimmed">
@@ -164,14 +172,14 @@ export function OptionsStep() {
           <Title order={4}>Content</Title>
           <Switch
             label="Migrate attachments"
-            description={xray ? "Attachments of the Jira issue, images inside its text and files of Xray steps." : copy ? "Every file of the cases and of the shared steps." : qase ? "Files of the cases and of their steps, and images inside text that Qase keeps." : "Case attachments and images inside text and steps."}
+            description={xray ? "Attachments of the Jira issue, images inside its text and files of Xray steps." : alm ? "Attachments of the tests and of their design steps, and pictures inside text. Attachments that are addresses become links." : copy ? "Every file of the cases and of the shared steps." : qase ? "Files of the cases and of their steps, and images inside text that Qase keeps." : "Case attachments and images inside text and steps."}
             checked={options.migrateAttachments}
             onChange={(e) => set("migrateAttachments", e.currentTarget.checked)}
           />
           <Switch
-            label={xray ? "Called tests become shared steps" : "Migrate shared steps"}
+            label={xray || alm ? "Called tests become shared steps" : "Migrate shared steps"}
             description={
-              xray
+              xray || alm
                 ? "A step that calls another test becomes an Allure TestOps shared step with the called test's steps. When off, those steps are copied into each case."
                 : `${qase ? "Qase" : copy ? "Source" : "TestRail"} shared steps become Allure TestOps shared steps. When off, their steps are copied into each case.`
             }
@@ -202,6 +210,8 @@ export function OptionsStep() {
                   ? "Higher is faster but puts more load on Allure TestOps. Reading from Qase is paced by the rate limit of its plan (step 1) regardless of this value."
                   : xray
                   ? "Higher is faster but puts more load on Jira, Xray and Allure TestOps."
+                  : alm
+                  ? "Higher is faster but puts more load on ALM and Allure TestOps."
                   : "Higher is faster but puts more load on both servers. The TestRail rate limit (step 1) caps the pace regardless of this value."
             }
             min={1}

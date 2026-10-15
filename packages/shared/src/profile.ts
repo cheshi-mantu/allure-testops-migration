@@ -118,6 +118,32 @@ export const QaseScopeSchema = z.object({
 });
 export type QaseScope = z.infer<typeof QaseScopeSchema>;
 
+export const ALM_AUTH = ["password", "apiKey"] as const;
+
+/** OpenText (Micro Focus, HP) ALM / Quality Center, read through its REST API. */
+export const AlmConnectionSchema = z.object({
+  /** Address of ALM, e.g. https://alm.example.com/qcbin. */
+  endpoint: z.string().default(""),
+  /** `password`: user name and password. `apiKey`: client id and secret of an API key (ALM 12.60 and later). */
+  auth: z.enum(ALM_AUTH).default("password"),
+  username: z.string().default(""),
+  password: z.string().default(""),
+  clientId: z.string().default(""),
+  secret: z.string().default(""),
+  insecureTls: z.boolean().default(false),
+});
+export type AlmConnection = z.infer<typeof AlmConnectionSchema>;
+
+export const AlmScopeSchema = z.object({
+  domain: z.string().default(""),
+  project: z.string().default(""),
+  /** Only tests of these Test Plan folders and of the folders inside them. Empty means the whole project. */
+  folderIds: z.array(z.number().int().positive()).default([]),
+  /** When not empty only these tests are migrated. */
+  testIds: z.array(z.number().int().positive()).default([]),
+});
+export type AlmScope = z.infer<typeof AlmScopeSchema>;
+
 export const TestRailScopeSchema = z.object({
   projectId: z.number().int().positive().nullable().default(null),
   /** Empty means all suites of the project. */
@@ -183,7 +209,7 @@ export const StructureMappingSchema = z.object({
 });
 export type StructureMapping = z.infer<typeof StructureMappingSchema>;
 
-export const SOURCES = ["testrail", "csv", "xray", "xml", "qase", "testops"] as const;
+export const SOURCES = ["testrail", "csv", "xray", "xml", "qase", "alm", "testops"] as const;
 export type SourceType = (typeof SOURCES)[number];
 
 /** Sources that read an uploaded file instead of connecting to a system. */
@@ -330,7 +356,7 @@ export const MigrationOptionsSchema = z.object({
   migrationTagPrefix: z.string().default("testrail"),
   /** Extra tag put on every migrated case, e.g. the migration date. */
   additionalTag: z.string().default(""),
-  /** Add a link back to the source case (TestRail, Xray, Qase). */
+  /** Add a link back to the source case (TestRail, Xray, Qase). ALM tests have no web address, so ALM ignores it. */
   selfLink: z.boolean().default(true),
   /** How to read TestRail text: `auto` detects HTML produced by the new TestRail editor. */
   textFormat: z.enum(["auto", "markdown", "html"]).default("auto"),
@@ -375,6 +401,15 @@ export const ProfileSchema = z.object({
     connection: QaseConnectionSchema.prefault({}),
     scope: QaseScopeSchema.prefault({}),
   }).prefault({}),
+  alm: z.object({
+    connection: AlmConnectionSchema.prefault({}),
+    scope: AlmScopeSchema.prefault({}),
+    /**
+     * Requests to ALM, the structure of its answers (field names and kinds of values, not the text of
+     * tests) and what was read for every test go to the run log at the debug level.
+     */
+    detailedLog: z.boolean().default(true),
+  }).prefault({}),
   testops: z.object({
     connection: TestOpsConnectionSchema.prefault({}),
     scope: TestOpsScopeSchema.prefault({}),
@@ -396,6 +431,8 @@ export const SECRET_PATHS = [
   ["xml", "files", "password"],
   ["xml", "files", "headerValue"],
   ["qase", "connection", "apiToken"],
+  ["alm", "connection", "password"],
+  ["alm", "connection", "secret"],
   ["testopsSource", "connection", "apiToken"],
   ["testops", "connection", "apiToken"],
 ] as const;

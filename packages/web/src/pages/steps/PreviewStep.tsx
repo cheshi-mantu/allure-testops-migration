@@ -178,14 +178,15 @@ function Preview() {
   const csv = isFileSource(profile.source);
   const xray = profile.source === "xray";
   const qase = profile.source === "qase";
+  const alm = profile.source === "alm";
   const copy = profile.source === "testops";
-  const labelOf = (s: { id: string; name: string }) => (csv ? `${s.name} [${s.id}]` : xray || qase ? `${s.id}: ${s.name}` : copy ? `#${s.id}: ${s.name}` : `C${s.id}: ${s.name}`);
+  const labelOf = (s: { id: string; name: string }) => (csv ? `${s.name} [${s.id}]` : xray || qase ? `${s.id}: ${s.name}` : copy || alm ? `#${s.id}: ${s.name}` : `C${s.id}: ${s.name}`);
   const labels = new Map(samples.map((s) => [labelOf(s), s.id]));
   const [query, setQuery] = useState(samples[0] ? labelOf(samples[0]) : "");
   // A picked sample, a typed TestRail id (C123) or, for CSV, a typed case id or name.
   const caseId =
     labels.get(query) ??
-    (csv ? query.trim() || null : copy ? (/^\s*#?(\d+)/.exec(query)?.[1] ?? null) : qase ? (/^\s*((?:[A-Za-z0-9_]+-)?\d+)/.exec(query)?.[1]?.toUpperCase() ?? null) : xray ? (/^\s*([A-Z][A-Z0-9_]*-\d+)/i.exec(query)?.[1]?.toUpperCase() ?? null) : (/^\s*C?(\d+)/i.exec(query)?.[1] ?? null));
+    (csv ? query.trim() || null : copy || alm ? (/^\s*#?(\d+)/.exec(query)?.[1] ?? null) : qase ? (/^\s*((?:[A-Za-z0-9_]+-)?\d+)/.exec(query)?.[1]?.toUpperCase() ?? null) : xray ? (/^\s*([A-Z][A-Z0-9_]*-\d+)/i.exec(query)?.[1]?.toUpperCase() ?? null) : (/^\s*C?(\d+)/i.exec(query)?.[1] ?? null));
   const preview = useMutation({
     mutationFn: async (id: string) => {
       await flush();
@@ -205,14 +206,14 @@ function Preview() {
   return (
     <Stack>
       <Text c="dimmed">
-        Converts one {csv ? "case of the file" : xray ? "Xray test" : qase ? "Qase case" : copy ? "case of the source Allure TestOps" : "TestRail case"} with the current settings and shows what will be written. Nothing is
+        Converts one {csv ? "case of the file" : xray ? "Xray test" : qase ? "Qase case" : alm ? "ALM test" : copy ? "case of the source Allure TestOps" : "TestRail case"} with the current settings and shows what will be written. Nothing is
         changed in Allure TestOps.
       </Text>
       <Group align="flex-end">
         <Autocomplete
-          label={csv ? "Case" : xray ? "Xray test" : qase ? "Qase case" : copy ? "Test case" : "TestRail case"}
+          label={csv ? "Case" : xray ? "Xray test" : qase ? "Qase case" : alm ? "ALM test" : copy ? "Test case" : "TestRail case"}
           description={
-            csv ? "Pick a case or type its id or name." : qase ? "Pick from the sample or type a case id, e.g. 12 or DEMO-12." : copy ? "Pick from the sample or type the id of a test case in the source." : xray ? "Pick from the sample or type an issue key, e.g. CALC-12." : "Pick from the sample or type a case id, e.g. C1234."
+            csv ? "Pick a case or type its id or name." : qase ? "Pick from the sample or type a case id, e.g. 12 or DEMO-12." : alm ? "Pick from the sample or type a test id, e.g. 1024." : copy ? "Pick from the sample or type the id of a test case in the source." : xray ? "Pick from the sample or type an issue key, e.g. CALC-12." : "Pick from the sample or type a case id, e.g. C1234."
           }
           w={460}
           data={[...labels.keys()]}
@@ -336,6 +337,8 @@ function Preview() {
                       ? "Files of Xray steps and other files attached to the Jira issue are migrated too."
                       : qase
                         ? "Files of the case and of its steps, and images of its text."
+                        : alm
+                        ? "Files of the test and of its design steps, and pictures in its text."
                         : copy
                           ? "Every other file of the case is copied too."
                           : "Other files attached to the case in TestRail are migrated too."}

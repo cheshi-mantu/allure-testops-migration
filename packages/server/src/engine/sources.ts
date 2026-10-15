@@ -1,4 +1,4 @@
-import { normalizePlanned, type PlannedCase, type Profile } from "@atm/shared";
+import { maskSecrets, normalizePlanned, type PlannedCase, type Profile } from "@atm/shared";
 import { groupCases, type CsvCase } from "../csv/cases.js";
 import { detectPathSeparator, loadCsv } from "../csv/discovery.js";
 import { transformCsvCase } from "../csv/transform.js";
@@ -12,6 +12,10 @@ import { noAssets, testRailAssets, type SourceAssets } from "./assets.js";
 import { KnownProblem } from "./problems.js";
 import { loadXml, requireNameField, transformXmlCase, xmlCases, type XmlCase } from "../xml/source.js";
 import { prepareFromTestOps } from "../fromtestops/source.js";
+import { loadAlmContext, readAlmTests, readCalledTests as readAlmCalledTests } from "../alm/discovery.js";
+import { testSummary } from "../alm/diagnostics.js";
+import { almLabel, transformAlmTest } from "../alm/transform.js";
+import { idOf, one, type AlmTest } from "../alm/types.js";
 import { loadQaseContext, readQaseCases } from "../qase/discovery.js";
 import { qaseCaseKey, transformQaseCase } from "../qase/transform.js";
 import type { QaseCase } from "../qase/types.js";
@@ -39,7 +43,7 @@ export interface Transformed {
   linkedCaseIds: string[];
 }
 
-type Log = (level: "info" | "warn", message: string, caseId?: string) => void;
+type Log = (level: "debug" | "info" | "warn", message: string, caseId?: string) => void;
 
 /** A source ready to hand out cases: TestRail or a CSV file. */
 export interface PreparedSource<C extends SourceCase = SourceCase> {
@@ -49,6 +53,8 @@ export interface PreparedSource<C extends SourceCase = SourceCase> {
   transform(testCase: C): Transformed;
   /** TestRail client when the source is TestRail, for rate limit reporting and request estimates. */
   testrail: TestRailClient | null;
+  /** Ends a session the source opened, e.g. an ALM login. */
+  close?(): Promise<void>;
 }
 
 export interface SourceDeps {
@@ -78,6 +84,8 @@ function readySource(profile: Profile, deps: SourceDeps, log: Log, onRetry?: (in
       return prepareXray(profile, log, onRetry);
     case "qase":
       return prepareQase(profile, log, onRetry);
+    case "alm":
+      return prepareAlm(profile, log, onRetry);
     case "testops":
       return prepareFromTestOps(profile, log, onRetry) as Promise<PreparedSource>;
     default:
@@ -139,6 +147,51 @@ async function prepareQase(profile: Profile, log: Log, onRetry?: (info: RetryInf
       // Which images in text are Qase files is told by the hosts of the attachments.
       context.assets.learn(cases);
       return cases.map((raw) => ({ key: qaseCaseKey(context.code, raw.id), title: raw.title, label: qaseCaseKey(context.code, raw.id), raw }));
+    },
+  };
+}
+
+type AlmSourceCase = SourceCase & { raw: AlmTest };
+
+async function prepareAlm(profile: Profile, log: Log, onRetry?: (info: RetryInfo) => void): Promise<PreparedSource<AlmSourceCase>> {
+  const detailed = profile.alm.detailedLog;
+  const trace = (message: string, caseId?: string) => log("debug", `ALM: ${message}`, caseId);
+  if (detailed) {
+    // The settings the run uses, without credentials, so the log alone explains what happened.
+    const settings = maskSecrets(profile, "strip");
+    trace(`Detailed log is on. Tool on Node.js ${process.version}. Settings: ${JSON.stringify({ alm: { ...settings.alm, connection: { ...settings.alm.connection, username: settings.alm.connection.username ? "(set)" : "", clientId: settings.alm.connection.clientId ? "(set)" : "" } }, structure: settings.structure, options: settings.options, fields: settings.fields })}`);
+  }
+  const context = await loadAlmContext(profile, onRetry, trace);
+  context.warnings.forEach((warning) => log("warn", warning));
+  log("info", `ALM project ${context.domain} / ${context.project}: ${context.totalTests} test(s), ${[...context.folders.values()].filter((folder) => folder.parentId !== 0).length} Test Plan folder(s).`);
+  return {
+    name: "ALM",
+    assets: context.assets,
+    testrail: null,
+    close: () => context.client.logout(),
+    transform: (testCase) => {
+      const result = transformAlmTest(testCase.raw, context);
+      if (detailed) {
+        trace(`${testCase.label}: ${testSummary(testCase.raw, result.planned)}`, testCase.key);
+      }
+      return result;
+    },
+    readCases: async (logCase, isCancelled) => {
+      const tests: AlmTest[] = [];
+      for await (const page of readAlmTests(context, profile)) {
+        tests.push(...page);
+        logCase("info", `Read ${tests.length} test(s) from ALM...`);
+        if (isCancelled()) {
+          break;
+        }
+      }
+      const missing = profile.alm.scope.testIds.filter((id) => !tests.some((test) => idOf(test.test) === id));
+      missing.forEach((id) => logCase("warn", `${almLabel(id)} is not a test of ALM project ${context.domain} / ${context.project}.`, String(id)));
+      await readAlmCalledTests(context, tests);
+      if (context.called.size > 0) {
+        logCase("info", `${context.called.size} test(s) are called by steps of other tests.`);
+      }
+      return tests.map((raw) => ({ key: String(idOf(raw.test)), title: one(raw.test, "name") ?? almLabel(idOf(raw.test)), label: almLabel(idOf(raw.test)), raw }));
     },
   };
 }

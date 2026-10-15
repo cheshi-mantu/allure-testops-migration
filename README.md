@@ -1,6 +1,6 @@
 # Allure TestOps Migration
 
-A web tool that moves test cases into [Allure TestOps](https://qameta.io/) from **TestRail**, **Xray Cloud**, **Qase**, **another Allure TestOps**, any **CSV file** or an **XML export** of another test management tool.
+A web tool that moves test cases into [Allure TestOps](https://qameta.io/) from **TestRail**, **Xray Cloud**, **Qase**, **OpenText ALM (Quality Center)**, **another Allure TestOps**, any **CSV file** or an **XML export** of another test management tool.
 
 Everything is configured in the browser: connect the systems, map the source structure and fields to Allure TestOps using live data from both sides, preview a converted case, do a dry run, then migrate. Running the migration again updates the migrated cases instead of duplicating them.
 
@@ -58,6 +58,7 @@ HOST=127.0.0.1 npm start
 - **TestRail**: the URL, a user email and an API key (*My Settings → API Keys*). The API must be enabled in *Administration → Site Settings → API*. Read access to the project is enough.
 - **Xray Cloud**: the Jira Cloud site, the email and an API token of an Atlassian account that can browse the project (*id.atlassian.com → Security → API tokens*), and an Xray API key: client id and client secret (*Jira → Apps → Xray → API Keys*).
 - **Qase**: an API token (*your profile → API tokens*) of a user who can read the project.
+- **ALM**: the address of ALM and a user name and password, or an API key (client id and secret, ALM 12.60 and later), of a user who is a member of the project and can read its Test Plan.
 - **CSV**: the file. Exports from spreadsheets, other test management tools and Allure TestOps itself work.
 - **XML**: the file. An export with one element per test case, for example from TestRail or TestLink.
 - **Allure TestOps**: the URL and an API token (*Your profile → API tokens*) of an account that can edit test cases in the target project. Listing users for owner mapping needs administrator rights; without them owners can still be typed in.
@@ -153,6 +154,36 @@ Create a profile with *Qase* as the source. The steps are Connections, Projects,
 
 Every migrated case gets the tag `qase:<project code>-<case id>`, for example `qase:demo-12`, and a link back to the case in Qase. Qase text is Markdown and is kept as it is.
 
+## ALM (Quality Center)
+
+> **Not yet verified on a real ALM server.** The ALM migration is built from the public ALM REST API reference and tested against a simulated ALM only. Check the connection, preview a few tests and do a dry run before migrating. If something fails or looks wrong, keep *Detailed log* on (Connections step), then download the log of the run (Run step, *Download log*) or copy the log of the connection check, and attach it to an issue with a description of the problem.
+
+Create a profile with *OpenText ALM (Quality Center)* as the source. The steps are Connections, Projects, Folders, Fields, Options, Preview and Run. The tool reads the Test Plan of a project through the ALM REST API (`/qcbin/rest`) and never writes to it. The REST API of ALM 12 and later answers in JSON, which the tool needs. The API is described in the public [ALM REST API Reference (Core)](https://admhelp.microfocus.com/alm/api_refs/REST_core/ALM_REST_API_Core.html); ALM 24.1 and later also serves a Swagger reference at `/qcbin/api-doc/v2/` on the server itself.
+
+- **Connections.** The address of ALM, with or without `/qcbin`, and either a user name and password or an API key (client id and secret, created in Site Administration). The tool logs in with the resources the ALM REST API reference documents (`alm-authenticate`, or `oauth2/login` for an API key, then `site-session`), falling back to the older Basic authentication resource on older versions. It opens one session per check, discovery, preview or run, logs in again when ALM ends a long session, and logs out as soon as it is done.
+- **Projects.** The domain and project, optionally some Test Plan folders (with everything inside them) or a list of test ids for a trial run.
+- **Folders.** Test Plan folders below *Subject* map to one custom field per level, like TestRail sections, including the tree.
+- **Fields.** The fields of the test entity, by the labels the project gave them in its customization (user fields such as `user-01` show as *Priority* or whatever the project calls them). Inactive and internal fields are left out. Each field gets a target of your choice:
+
+| ALM | Allure TestOps by default |
+| --- | --- |
+| Description | Description; pictures in it become attachments and keep their place |
+| Comments | A comment of the case |
+| Design steps | Scenario: description and expected result of every step in step order, files of the steps, pictures in step text; a step name someone changed from "Step N" stays with its step |
+| Steps that call another test | Allure TestOps shared steps named after the called test, or its steps copied into the case |
+| Parameters | The description, as a list of names with default values; or one example of the test case with the default values |
+| Designer | Owner, matched to Allure TestOps users by email or user name |
+| Status | Status (Ready to Active; Design, Imported and Repair to Draft) |
+| Type | Custom field Test type (MANUAL to Manual, QUICKTEST_TEST to UFT…) |
+| User fields with a list of values | Custom fields with the same labels; values of multi-value lists each become a value |
+| User fields with users | Members with a role of your choice, e.g. Reviewer |
+| Other user fields | Custom fields; memo fields in the description under their label |
+| Attachments of the test | Attachments of the case; URL attachments become links |
+
+**Detailed log.** On by default for ALM. Every request to ALM goes to the log with its status, time and the shape of the answer: how many entities and `TotalResults`, and for the first entity of every kind of collection its field names and the kind of each value (`text 23`, `html 512`, `number`); only short codes such as the test type, status, `ref-type` or `link-test` are written as they are. The log also holds the field settings of the project, how the login went (which resources answered, which cookies were set, by name only), the run settings without credentials, and for every test: the number and order of design steps, called tests, parameters, attachments of the test and its steps, pictures in text and whether ALM lists them, and what the test becomes. Passwords, secrets, cookie values and the text of the tests are never written; names of tests and files are. In the run log these lines are at the debug level, shown under *With details*.
+
+Every migrated case gets the tag `alm:<test id>`, for example `alm:1024`. ALM tests have no web address, so there is no link back. Parameters such as `<<<amount>>>` stay in the step text as they are.
+
 ## Another Allure TestOps
 
 Create a profile with *Another Allure TestOps* as the source to copy projects of one Allure TestOps instance into another, one to one. The steps are Connections, Projects, Options, Preview and Run; there is no field mapping, because every field keeps its name.
@@ -233,7 +264,7 @@ npm test             # unit tests and an end-to-end migration against fake serve
 Run locally with fake TestRail and Allure TestOps servers:
 
 ```bash
-npm run dev:mocks    # TestRail on :4001, Allure TestOps on :4002, Jira and Xray Cloud on :4003, Qase on :4004
+npm run dev:mocks    # TestRail on :4001, Allure TestOps on :4002, Jira and Xray Cloud on :4003, Qase on :4004, ALM on :4005
 npm run dev:server   # API and UI on :8080 (UI from packages/web/dist)
 npm run dev:web      # optional: UI with hot reload on :5173, proxies /api to :8080
 ```
@@ -245,7 +276,7 @@ docker compose -f dev-compose.yml up --build -d
 docker compose -f dev-compose.yml run --rm --build tests -d
 ```
 
-Fake server credentials: TestRail user `demo@example.com` with API key `demo-api-key`, Allure TestOps token `demo-api-token`. Inside `dev-compose.yml` use `http://mocks:4001` and `http://mocks:4002` as URLs; from the host use `http://localhost:4001` and `http://localhost:4002`. The fake Jira and Xray Cloud run on port 4003 (`http://mocks:4003` or `http://localhost:4003` for both the Jira site and the Xray API URL): Jira `demo@example.com` with token `demo-jira-token`, Xray client id `demo-client-id` and secret `demo-client-secret`. The fake Qase runs on port 4004 with the API token `demo-qase-token`: enter `http://mocks:4004` or `http://localhost:4004` as the Qase API address.
+Fake server credentials: TestRail user `demo@example.com` with API key `demo-api-key`, Allure TestOps token `demo-api-token`. Inside `dev-compose.yml` use `http://mocks:4001` and `http://mocks:4002` as URLs; from the host use `http://localhost:4001` and `http://localhost:4002`. The fake Jira and Xray Cloud run on port 4003 (`http://mocks:4003` or `http://localhost:4003` for both the Jira site and the Xray API URL): Jira `demo@example.com` with token `demo-jira-token`, Xray client id `demo-client-id` and secret `demo-client-secret`. The fake Qase runs on port 4004 with the API token `demo-qase-token`: enter `http://mocks:4004` or `http://localhost:4004` as the Qase API address. The fake ALM runs on port 4005 (`http://mocks:4005` or `http://localhost:4005`): user `demo` with password `demo-password`, or API key `demo-client` with secret `demo-secret`, domain DEFAULT and project Banking.
 
 ### Test data in a real Xray Cloud
 
@@ -283,9 +314,9 @@ npx tsx dev/testrail-seed.ts --bulk 300
 ```
 packages/
   shared/   profile schema (zod), API types, default mappings, section level mapping
-  server/   Fastify API, TestRail, Jira, Xray, Qase and Allure TestOps clients, CSV and XML reading, conversion, migration engine
+  server/   Fastify API, TestRail, Jira, Xray, Qase, ALM and Allure TestOps clients, CSV and XML reading, conversion, migration engine
   web/      React + Mantine UI
-  mocks/    fake TestRail, Jira with Xray Cloud, Qase and Allure TestOps servers with synthetic projects
+  mocks/    fake TestRail, Jira with Xray Cloud, Qase, ALM and Allure TestOps servers with synthetic projects
 ```
 
 The conversion is split into a pure transformation (`server/src/convert`), which turns a TestRail case into a planned Allure TestOps case and backs both the preview and the migration, and a writer (`server/src/engine/writer.ts`) that applies the plan idempotently.

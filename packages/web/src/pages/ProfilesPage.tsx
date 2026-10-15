@@ -80,7 +80,7 @@ export function ProfilesPage() {
           <Stack align="center" gap="xs">
             <Title order={4}>No profiles yet</Title>
             <Text c="dimmed" ta="center" maw={520}>
-              Create a profile to migrate from TestRail, Xray Cloud, Qase, a CSV or an XML file: map structure and fields using the real data, preview the result
+              Create a profile to migrate from TestRail, Xray Cloud, Qase, ALM, a CSV or an XML file: map structure and fields using the real data, preview the result
               and run the migration. Or import a profile exported on another machine.
             </Text>
             <Button mt="sm" leftSection={<IconPlus size={16} />} onClick={() => setCreating(true)}>
@@ -104,6 +104,8 @@ export function ProfilesPage() {
                 ? `${profile.source === "xml" ? "XML" : "CSV"} ${profile.fileName ? `"${profile.fileName}"` : "file not chosen"}`
                 : profile.source === "qase"
                   ? `Qase project ${profile.qaseProject || "not chosen"}`
+                  : profile.source === "alm"
+                  ? `ALM project ${profile.almProject || "not chosen"}`
                   : profile.source === "testops"
                   ? `Allure TestOps: ${profile.testopsProjects?.length ? profile.testopsProjects.join(", ") : "no projects chosen"}`
                   : profile.source === "xray"
@@ -135,7 +137,7 @@ export function ProfilesPage() {
                 const next = value as SourceType;
                 setSource(next);
                 if (!nameTouched) {
-                  setName(next === "csv" ? "CSV import" : next === "xml" ? "XML import" : next === "xray" ? "Xray migration" : next === "qase" ? "Qase migration" : next === "testops" ? "Allure TestOps copy" : "TestRail migration");
+                  setName(next === "csv" ? "CSV import" : next === "xml" ? "XML import" : next === "xray" ? "Xray migration" : next === "qase" ? "Qase migration" : next === "alm" ? "ALM migration" : next === "testops" ? "Allure TestOps copy" : "TestRail migration");
                 }
               }}
             >
@@ -155,6 +157,11 @@ export function ProfilesPage() {
                   value="qase"
                   label="Qase"
                   description="Reads a Qase project through its API: suites, classic and Gherkin steps, shared steps, parameters, system and custom fields, tags and attachments."
+                />
+                <Radio
+                  value="alm"
+                  label="OpenText ALM (Quality Center)"
+                  description="Reads the Test Plan of an ALM project through its REST API: folders, design steps, called tests, parameters, system and user fields, and attachments. Not yet verified on a real ALM server: start with a dry run, with the detailed log on."
                 />
                 <Radio
                   value="csv"
