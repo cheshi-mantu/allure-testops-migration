@@ -86,7 +86,7 @@ export interface SuiteStructure {
 
 /** What the mapping screens show about the source: structure, fields and sample cases. */
 export interface SourceDiscovery {
-  source: "testrail" | "csv" | "xray" | "xml" | "qase";
+  source: "testrail" | "csv" | "xray" | "xml" | "qase" | "testops";
   project: NamedId & { suiteMode: number };
   suites: NamedId[];
   structure: SuiteStructure[];
@@ -279,6 +279,10 @@ export interface PlannedCase {
   issues: { key: string; integrationId: number | null }[];
   /** Keys of the case in a test management system known to Allure TestOps through an integration, e.g. an Xray test key. */
   testKeys?: { key: string; integrationId: number }[];
+  /** Automated or manual; the case keeps what it has when not set. */
+  automated?: boolean;
+  /** Workflow of the status, by name; the project's default workflow when not set. */
+  workflow?: string | null;
   /** Examples of the test case (sets of parameter values); the case keeps what it has when not set. */
   examples?: PlannedExample[];
   comments: string[];
@@ -340,6 +344,8 @@ export interface RunLogEntry {
   /** Source case key: the TestRail case id or the CSV case key. */
   caseId?: string;
   targetId?: number;
+  /** Project of `targetId` when a run writes to several projects. */
+  targetProjectId?: number;
   /** Key of the RunProblem this line belongs to. */
   problem?: string;
 }
@@ -347,7 +353,7 @@ export interface RunLogEntry {
 export interface ProfileListItem {
   id: string;
   name: string;
-  source: "testrail" | "csv" | "xray" | "xml" | "qase";
+  source: "testrail" | "csv" | "xray" | "xml" | "qase" | "testops";
   /** CSV and XML: name of the chosen file. */
   fileName: string | null;
   updatedAt: string;
@@ -356,6 +362,8 @@ export interface ProfileListItem {
   xrayProject?: string;
   /** Qase: project code. */
   qaseProject?: string;
+  /** Allure TestOps source: names of the chosen projects. */
+  testopsProjects?: string[];
   testopsEndpoint: string;
   lastRun: RunSummary | null;
 }

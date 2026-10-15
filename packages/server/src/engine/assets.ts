@@ -1,4 +1,4 @@
-import type { PlannedStep, Profile } from "@atm/shared";
+import type { PlannedAttachment, PlannedStep, Profile } from "@atm/shared";
 import { separatedSteps } from "../convert/steps.js";
 import type { TestRailClient } from "../testrail/client.js";
 import type { TrSharedStep, TrStep } from "../testrail/types.js";
@@ -16,6 +16,8 @@ export interface SharedStepContent {
   title: string;
   /** Name of the Allure TestOps shared step, the same on every run; "<title> [<id>]" when not set. */
   name?: string;
+  /** Files of the shared step that its steps do not show, uploaded too. */
+  attachments?: PlannedAttachment[];
   steps: PlannedStep[];
 }
 

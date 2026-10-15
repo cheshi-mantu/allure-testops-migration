@@ -11,6 +11,7 @@ import type { TrCase } from "../testrail/types.js";
 import { noAssets, testRailAssets, type SourceAssets } from "./assets.js";
 import { KnownProblem } from "./problems.js";
 import { loadXml, requireNameField, transformXmlCase, xmlCases, type XmlCase } from "../xml/source.js";
+import { prepareFromTestOps } from "../fromtestops/source.js";
 import { loadQaseContext, readQaseCases } from "../qase/discovery.js";
 import { qaseCaseKey, transformQaseCase } from "../qase/transform.js";
 import type { QaseCase } from "../qase/types.js";
@@ -77,6 +78,8 @@ function readySource(profile: Profile, deps: SourceDeps, log: Log, onRetry?: (in
       return prepareXray(profile, log, onRetry);
     case "qase":
       return prepareQase(profile, log, onRetry);
+    case "testops":
+      return prepareFromTestOps(profile, log, onRetry) as Promise<PreparedSource>;
     default:
       return prepareTestRail(profile, log, onRetry);
   }

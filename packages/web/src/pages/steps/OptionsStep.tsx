@@ -21,6 +21,8 @@ export function OptionsStep() {
   const xray = profile.source === "xray";
   const qase = profile.source === "qase";
   const testrail = profile.source === "testrail";
+  /** Another Allure TestOps: text is Markdown on both sides and moves as it is. */
+  const copy = profile.source === "testops";
   const prefixMissing = options.migrationTagPrefix.trim() === "";
   const prefixShown = prefixMissing ? "<prefix>" : options.migrationTagPrefix;
   const set = <K extends keyof MigrationOptions>(key: K, value: MigrationOptions[K]) => update((p) => void (p.options[key] = value));
@@ -36,13 +38,15 @@ export function OptionsStep() {
             description={
               csv
                 ? `Every case gets the tag "${prefixShown}:<case id>". Reruns find cases by this tag and update them.`
-                : qase
+                : copy
+                  ? `Every case gets the tag "${prefixShown}:<id of the case in the source>", e.g. "${prefixShown}:12344". Reruns find cases by this tag and update them.`
+                  : qase
                   ? `Every case gets the tag "${prefixShown}:<project code>-<case id>", e.g. "${prefixShown}:demo-12". Reruns find cases by this tag and update them.`
                   : xray
                   ? `Every case gets the tag "${prefixShown}:<issue key>", e.g. "${prefixShown}:calc-12". Reruns find cases by this tag and update them.`
                   : `Every case gets the tag "${prefixShown}:<TestRail id>". Reruns find cases by this tag and update them. Keep "testrail" to continue a migration made with the previous migration tool.`
             }
-            placeholder={xml ? "e.g. xml-regression" : csv ? "e.g. csv-regression" : xray ? "xray" : qase ? "qase" : "testrail"}
+            placeholder={xml ? "e.g. xml-regression" : csv ? "e.g. csv-regression" : xray ? "xray" : qase ? "qase" : copy ? "old_id" : "testrail"}
             value={options.migrationTagPrefix}
             error={prefixMissing ? "Enter a prefix. Without it migrated cases cannot be found again, so the migration cannot start." : undefined}
             onChange={(e) => set("migrationTagPrefix", e.currentTarget.value.trim())}
@@ -55,7 +59,7 @@ export function OptionsStep() {
           />
           {!csv && (
           <Switch
-            label={xray ? "Link back to the Jira issue" : qase ? "Link back to the Qase case" : "Link back to the TestRail case"}
+            label={xray ? "Link back to the Jira issue" : qase ? "Link back to the Qase case" : copy ? "Link back to the case in the source Allure TestOps" : "Link back to the TestRail case"}
             description={xray ? "A link named after the issue key, e.g. \"Jira CALC-12\", in the Links of the case." : qase ? "A link named after the case, e.g. \"Qase DEMO-12\", in the Links of the case." : undefined}
             checked={options.selfLink}
             onChange={(e) => set("selfLink", e.currentTarget.checked)}
@@ -91,7 +95,12 @@ export function OptionsStep() {
       <Card withBorder>
         <Stack>
           <Title order={4}>Text</Title>
-          {!xray && (
+          {copy && (
+            <Text size="sm" c="dimmed">
+              Text is Markdown in both Allure TestOps instances and is copied as it is; images in text point to the copied files.
+            </Text>
+          )}
+          {!xray && !copy && (
           <Radio.Group
             label={csv ? "Text format" : qase ? "Qase text format" : "TestRail text format"}
             description={xml ? "Text in the file may be Markdown or HTML." : csv ? "Text cells may hold Markdown or HTML." : qase ? "Qase keeps text as Markdown; text written in an older editor may be HTML." : "Newer TestRail versions store HTML; older ones use Markdown."}
@@ -110,7 +119,7 @@ export function OptionsStep() {
               Jira rich text and Xray wiki markup are converted to Markdown; images in Jira text become attachments of the case.
             </Text>
           )}
-          {!csv && (
+          {!csv && !copy && (
           <Radio.Group
             label={xray ? "Generic definitions and other text mapped to the scenario" : "Steps written as plain text"}
             value={options.textSteps}
@@ -122,6 +131,7 @@ export function OptionsStep() {
             </Stack>
           </Radio.Group>
           )}
+          {!copy && (
           <Radio.Group
             label="Tables of Gherkin Examples"
             description="The table under Examples: of a Scenario Outline, in any text mapped to the scenario."
@@ -137,6 +147,7 @@ export function OptionsStep() {
               />
             </Stack>
           </Radio.Group>
+          )}
           {testrail && (
           <Switch
             label="Add suite and section descriptions to the case description"
@@ -153,7 +164,7 @@ export function OptionsStep() {
           <Title order={4}>Content</Title>
           <Switch
             label="Migrate attachments"
-            description={xray ? "Attachments of the Jira issue, images inside its text and files of Xray steps." : qase ? "Files of the cases and of their steps, and images inside text that Qase keeps." : "Case attachments and images inside text and steps."}
+            description={xray ? "Attachments of the Jira issue, images inside its text and files of Xray steps." : copy ? "Every file of the cases and of the shared steps." : qase ? "Files of the cases and of their steps, and images inside text that Qase keeps." : "Case attachments and images inside text and steps."}
             checked={options.migrateAttachments}
             onChange={(e) => set("migrateAttachments", e.currentTarget.checked)}
           />
@@ -162,7 +173,7 @@ export function OptionsStep() {
             description={
               xray
                 ? "A step that calls another test becomes an Allure TestOps shared step with the called test's steps. When off, those steps are copied into each case."
-                : `${qase ? "Qase" : "TestRail"} shared steps become Allure TestOps shared steps. When off, their steps are copied into each case.`
+                : `${qase ? "Qase" : copy ? "Source" : "TestRail"} shared steps become Allure TestOps shared steps. When off, their steps are copied into each case.`
             }
             checked={options.migrateSharedSteps}
             onChange={(e) => set("migrateSharedSteps", e.currentTarget.checked)}

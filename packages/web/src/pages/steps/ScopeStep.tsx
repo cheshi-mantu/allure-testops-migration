@@ -1,4 +1,4 @@
-import { Alert, Card, Code, Loader, MultiSelect, Select, SimpleGrid, Stack, TagsInput, Text, TextInput, Title } from "@mantine/core";
+import { Alert, Button, Card, Checkbox, Code, Group, Loader, MultiSelect, Select, SimpleGrid, Stack, Table, TagsInput, Text, TextInput, Title } from "@mantine/core";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { isFileSource } from "@atm/shared";
@@ -58,6 +58,10 @@ export function ScopeStep() {
       });
     }
   }, [trProjects.data, toProjects.data, profile.testrail.scope.projectId, profile.testops.scope.projectId, update]);
+
+  if (profile.source === "testops") {
+    return <TestOpsSourceScope onChange={invalidateDiscovery} />;
+  }
 
   return (
     <Stack>
@@ -140,6 +144,206 @@ export function ScopeStep() {
           </Stack>
         </Card>
       </SimpleGrid>
+    </Stack>
+  );
+}
+
+/**
+ * Projects of the source Allure TestOps, each with the name of its project in the target, and the
+ * integrations of the target their issues and test keys go through.
+ */
+function TestOpsSourceScope({ onChange }: { onChange: () => void }) {
+  const { profile, update, flush } = useProfile();
+  const scope = profile.testopsSource;
+  const projects = useQuery({
+    queryKey: ["projects", "testops-source", profile.id],
+    queryFn: async () => {
+      await flush();
+      const result = await api.checkTestOpsSource(profile.id);
+      if (!result.ok) {
+        throw new Error(result.message);
+      }
+      return result.projects;
+    },
+  });
+  const chosen = scope.projects.map((p) => p.sourceId).join(",");
+  const integrations = useQuery({
+    queryKey: ["integrations", "testops-source", profile.id, chosen],
+    queryFn: async () => {
+      await flush();
+      return api.testOpsSourceIntegrations(profile.id);
+    },
+    enabled: scope.projects.length > 0,
+  });
+  // Suggested integrations become the mapping until the user changes them.
+  useEffect(() => {
+    const missing = (integrations.data?.source ?? []).filter((i) => !(String(i.id) in scope.integrations) && i.suggested);
+    if (missing.length > 0) {
+      update((p) => missing.forEach((i) => (p.testopsSource.integrations[String(i.id)] = i.suggested)));
+    }
+  }, [integrations.data, scope.integrations, update]);
+
+  return (
+    <Stack>
+      <Card withBorder>
+        <Stack>
+          <Title order={4}>Projects to copy</Title>
+          <Text size="sm" c="dimmed">
+            Each project goes into a project of the target with the name below: the project is created on the first run and found by its name
+            on the next ones, which update the cases instead of duplicating them.
+          </Text>
+          {projects.error && <Alert color="red">{errorText(projects.error)}</Alert>}
+          <MultiSelect
+            label="Projects of the source Allure TestOps"
+            placeholder={projects.isLoading ? "Loading…" : scope.projects.length ? undefined : "Choose projects"}
+            searchable
+            clearable
+            data={(projects.data ?? []).map((p) => ({ value: String(p.id), label: `${p.name} (#${p.id})` }))}
+            value={scope.projects.map((p) => String(p.sourceId))}
+            onChange={(values) => {
+              update((p) => {
+                const kept = new Map(p.testopsSource.projects.map((pair) => [String(pair.sourceId), pair]));
+                p.testopsSource.projects = values.map((value) => {
+                  const known = kept.get(value);
+                  const name = projects.data?.find((project) => String(project.id) === value)?.name ?? known?.sourceName ?? value;
+                  return known ?? { sourceId: Number(value), sourceName: name, targetName: name };
+                });
+              });
+              onChange();
+            }}
+          />
+          {scope.projects.length > 0 && (
+            <Table verticalSpacing={6}>
+              <Table.Thead>
+                <Table.Tr>
+                  <Table.Th>Source project</Table.Th>
+                  <Table.Th>Project in the target</Table.Th>
+                </Table.Tr>
+              </Table.Thead>
+              <Table.Tbody>
+                {scope.projects.map((pair, index) => (
+                  <Table.Tr key={pair.sourceId}>
+                    <Table.Td>
+                      {pair.sourceName} <Text span size="xs" c="dimmed">#{pair.sourceId}</Text>
+                    </Table.Td>
+                    <Table.Td>
+                      <TextInput
+                        aria-label={`Target project for ${pair.sourceName}`}
+                        value={pair.targetName}
+                        error={pair.targetName.trim() ? undefined : "Enter a name"}
+                        onChange={(e) => {
+                          const value = e.currentTarget.value;
+                          update((p) => void (p.testopsSource.projects[index]!.targetName = value));
+                        }}
+                      />
+                    </Table.Td>
+                  </Table.Tr>
+                ))}
+              </Table.Tbody>
+            </Table>
+          )}
+          <div>
+            <Text size="sm" fw={500}>
+              Test cases to migrate
+            </Text>
+            <Group gap="lg" mt={6}>
+              <Checkbox
+                label="Manual"
+                checked={scope.manual}
+                onChange={(e) => {
+                  const checked = e.currentTarget.checked;
+                  update((p) => void (p.testopsSource.manual = checked));
+                  onChange();
+                }}
+              />
+              <Checkbox
+                label="Automated"
+                checked={scope.automated}
+                onChange={(e) => {
+                  const checked = e.currentTarget.checked;
+                  update((p) => void (p.testopsSource.automated = checked));
+                  onChange();
+                }}
+              />
+            </Group>
+            <Text size="xs" c={scope.manual || scope.automated ? "dimmed" : "red"} mt={4}>
+              {scope.manual || scope.automated ? "By the Automated flag of the test case in the source." : "Choose manual or automated test cases, or both."}
+            </Text>
+          </div>
+          <TagsInput
+            label="Only these test cases (optional)"
+            description="Ids of test cases in the source, for a trial run. Leave empty for every case of the chosen projects."
+            placeholder="Type an id and press Enter"
+            value={scope.caseIds.map(String)}
+            onChange={(values) => {
+              const ids = values.map((value) => Number(value.replace(/^#/, ""))).filter((id) => Number.isInteger(id) && id > 0);
+              update((p) => void (p.testopsSource.caseIds = [...new Set(ids)]));
+              onChange();
+            }}
+          />
+        </Stack>
+      </Card>
+
+      {scope.projects.length > 0 && (
+        <Card withBorder>
+          <Stack>
+            <Title order={4}>Integrations</Title>
+            <Text size="sm" c="dimmed">
+              Issues and test keys of a case belong to an integration (Jira, YouTrack…). Choose the integration of the target each of them goes
+              through; the migration adds it to the target project. Credentials of integrations cannot be copied: if the target has no such
+              integration yet, an administrator sets it up in the target (Administration, Integrations), then reload this list.
+            </Text>
+            {integrations.isLoading && <Loader size="sm" />}
+            {integrations.error && <Alert color="red">{errorText(integrations.error)}</Alert>}
+            {integrations.data && integrations.data.source.length === 0 && <Text size="sm">The chosen projects use no integrations.</Text>}
+            {integrations.data && integrations.data.source.length > 0 && (
+              <Table verticalSpacing={6}>
+                <Table.Thead>
+                  <Table.Tr>
+                    <Table.Th>In the source</Table.Th>
+                    <Table.Th>In the target</Table.Th>
+                  </Table.Tr>
+                </Table.Thead>
+                <Table.Tbody>
+                  {integrations.data.source.map((integration) => {
+                    const value = scope.integrations[String(integration.id)];
+                    return (
+                      <Table.Tr key={integration.id}>
+                        <Table.Td>
+                          <Text size="sm" fw={500}>
+                            {integration.name}
+                          </Text>
+                          <Text size="xs" c="dimmed">
+                            {[integration.type, integration.projects.join(", ")].filter(Boolean).join(" · ")}
+                          </Text>
+                        </Table.Td>
+                        <Table.Td>
+                          <Select
+                            aria-label={`Target integration for ${integration.name}`}
+                            allowDeselect={false}
+                            data={[
+                              { value: "", label: "Do not migrate its issues and test keys" },
+                              ...integrations.data!.target.map((t) => ({ value: String(t.id), label: `${t.name}${t.type ? ` (${t.type})` : ""}` })),
+                            ]}
+                            value={value ? String(value) : ""}
+                            error={value ? undefined : integrations.data!.target.length === 0 ? "The target has no integrations yet" : undefined}
+                            onChange={(next) => update((p) => void (p.testopsSource.integrations[String(integration.id)] = next ? Number(next) : null))}
+                          />
+                        </Table.Td>
+                      </Table.Tr>
+                    );
+                  })}
+                </Table.Tbody>
+              </Table>
+            )}
+            <Group>
+              <Button variant="light" size="xs" loading={integrations.isFetching} onClick={() => void integrations.refetch()}>
+                Reload integrations
+              </Button>
+            </Group>
+          </Stack>
+        </Card>
+      )}
     </Stack>
   );
 }

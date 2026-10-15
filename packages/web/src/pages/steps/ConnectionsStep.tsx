@@ -72,6 +72,7 @@ export function ConnectionsStep() {
       <SimpleGrid cols={{ base: 1, lg: profile.source === "csv" ? 1 : 2 }} maw={profile.source === "csv" ? 640 : undefined}>
         {profile.source === "xray" && <XrayConnectionCard />}
         {profile.source === "qase" && <QaseConnectionCard />}
+        {profile.source === "testops" && <TestOpsSourceCard />}
         {profile.source === "testrail" && (
         <Card withBorder>
           <Stack>
@@ -169,7 +170,7 @@ export function ConnectionsStep() {
 
         <Card withBorder>
           <Stack>
-            <Title order={4}>Allure TestOps (target)</Title>
+            <Title order={4}>{profile.source === "testops" ? "Target Allure TestOps" : "Allure TestOps (target)"}</Title>
             <TextInput
               label="Allure TestOps URL"
               placeholder="https://testops.yourcompany.com/"
@@ -323,6 +324,56 @@ const QASE_PLANS: { value: QaseConnection["rateLimit"]; label: string }[] = [
   { value: "business", label: `Teams or Business: ${QASE_RATE_LIMITS.business} requests per minute` },
   { value: "enterprise", label: `Enterprise: ${QASE_RATE_LIMITS.enterprise} requests per minute` },
 ];
+
+/** The Allure TestOps the projects are copied from. */
+function TestOpsSourceCard() {
+  const { profile, update, flush } = useProfile();
+  const queryClient = useQueryClient();
+  const sc = profile.testopsSource.connection;
+  const check = useMutation({
+    mutationFn: async () => {
+      await flush();
+      return api.checkTestOpsSource(profile.id);
+    },
+    onSuccess: (result) => queryClient.setQueryData(["projects", "testops-source", profile.id], result.projects),
+  });
+  const set = <K extends keyof typeof sc>(key: K, value: (typeof sc)[K]) => update((p) => void (p.testopsSource.connection[key] = value));
+
+  return (
+    <Card withBorder>
+      <Stack>
+        <Title order={4}>Source Allure TestOps</Title>
+        <Text size="sm" c="dimmed">
+          The instance the projects are copied from. It is only read: a token of a user who can see the projects is enough.
+        </Text>
+        <TextInput label="Allure TestOps URL" placeholder="https://old-testops.yourcompany.com/" value={sc.endpoint} onChange={(e) => set("endpoint", e.currentTarget.value)} />
+        <PasswordInput
+          label="API token"
+          description={
+            <>
+              Create one in the source Allure TestOps under <i>Your profile → API tokens</i>.
+            </>
+          }
+          placeholder={secretPlaceholder(sc.apiToken)}
+          value={secretValue(sc.apiToken)}
+          onChange={(e) => set("apiToken", e.currentTarget.value)}
+        />
+        <Switch
+          label="Skip TLS certificate verification"
+          description="For servers with self-signed certificates."
+          checked={sc.insecureTls}
+          onChange={(e) => set("insecureTls", e.currentTarget.checked)}
+        />
+        <Group>
+          <Button variant="light" loading={check.isPending} onClick={() => check.mutate()}>
+            Test connection
+          </Button>
+        </Group>
+        <CheckAlert result={check.data} error={check.error} />
+      </Stack>
+    </Card>
+  );
+}
 
 function QaseConnectionCard() {
   const { profile, update, flush } = useProfile();

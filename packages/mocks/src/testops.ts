@@ -29,6 +29,8 @@ interface TestCase {
   cfv: { name: string; customField: { id: number; name?: string } }[];
   issues: unknown[];
   testKeys: { name: string; integrationId: number }[];
+  automated?: boolean;
+  workflowId?: number;
   examples: { id: number; parameters: { name: string; value: string }[] }[];
   members: unknown[];
   scenario: Step[];
@@ -88,17 +90,23 @@ export function createTestOpsMock(options: TestOpsMockOptions = {}): { app: Fast
     { id: 1, name: "Demo" },
     { id: 2, name: "Sandbox" },
   ];
-  const statuses: Named[] = [
+  const statuses: (Named & { color?: string })[] = [
     { id: 1, name: "Draft" },
     { id: 2, name: "Active" },
     { id: 3, name: "Outdated" },
   ];
+  const workflows: { id: number; name: string; statusIds: number[] }[] = [{ id: 1, name: "Default", statusIds: statuses.map((s) => s.id) }];
+  const workflowSchemas: { id: number; projectId: number; workflowId: number; type: string }[] = [];
   const accounts = [
     { id: 1, username: "admin", email: "admin@example.com", firstName: "Admin", lastName: "" },
     { id: 2, username: "jane", email: "jane@example.com", firstName: "Jane", lastName: "Doe" },
     { id: 3, username: "sam", email: "sam@example.com", firstName: "Sam", lastName: "Tester" },
   ];
-  const integrations: Record<number, (Named & { disabled: boolean })[]> = { 1: [{ id: 1, name: "Jira", disabled: false }] };
+  const instanceIntegrations = [
+    { id: 1, name: "Jira", info: { name: "Jira", type: "jira" } },
+    { id: 5, name: "YouTrack", info: { name: "YouTrack", type: "youtrack" } },
+  ];
+  const integrations: Record<number, (Named & { disabled: boolean; info?: unknown })[]> = { 1: [{ ...instanceIntegrations[0]!, disabled: false }] };
   const state: TestOpsMockState = {
     customFields: [
       { id: 1, name: "Epic" },
@@ -162,7 +170,50 @@ export function createTestOpsMock(options: TestOpsMockOptions = {}): { app: Fast
     }
     return found;
   };
-  const normalized = (steps: Step[]) => ({ root: { children: steps.map((s) => s.id) }, scenarioSteps: {} });
+  /**
+   * A scenario as Allure TestOps lists it: every step by id, children by id, the expected result as
+   * a step of its own the parent points to, files and shared steps (with their steps) by id.
+   * Top level steps keep the ids they are stored with, so they can be deleted by them.
+   */
+  let nestedId = 9_000_000;
+  const files = (list: Named[]) => Object.fromEntries(list.map((a) => [a.id, { id: a.id, name: a.name, contentType: "application/octet-stream" }]));
+  const normalized = (steps: Step[], own: Named[] = []) => {
+    const scenarioSteps: Record<number, Record<string, unknown>> = {};
+    const sharedSteps: Record<number, Record<string, unknown>> = {};
+    const sharedStepScenarioSteps: Record<number, Record<string, unknown>> = {};
+    const sharedStepAttachments: Record<number, unknown> = {};
+    const add = (data: Record<string, unknown>, into: Record<number, Record<string, unknown>>, fixedId?: number): number => {
+      const stepId = fixedId ?? ++nestedId;
+      switch (data.type) {
+        case "attachment":
+          into[stepId] = { id: stepId, attachmentId: data.attachmentId, children: [] };
+          break;
+        case "shared": {
+          const shared = state.sharedSteps.find((s) => s.id === data.sharedStepId);
+          into[stepId] = { id: stepId, sharedStepId: data.sharedStepId, children: [] };
+          if (shared && !sharedSteps[shared.id]) {
+            sharedSteps[shared.id] = { id: shared.id, name: shared.name, body: shared.name, children: shared.scenario.map((s) => add(s.data, sharedStepScenarioSteps)) };
+            Object.assign(sharedStepAttachments, files(shared.attachments));
+          }
+          break;
+        }
+        default: {
+          const children = ((data.steps as Record<string, unknown>[] | undefined) ?? []).map((child) => add(child, into));
+          let expectedResultId: number | undefined;
+          const expected = (data.expectedResultSteps as Record<string, unknown>[] | undefined) ?? [];
+          if (expected.length > 0) {
+            expectedResultId = ++nestedId;
+            into[expectedResultId] = { id: expectedResultId, body: "Expected Result", children: expected.map((child) => add(child, into)) };
+            children.push(expectedResultId);
+          }
+          into[stepId] = { id: stepId, body: data.body, children, ...(expectedResultId ? { expectedResultId } : {}) };
+        }
+      }
+      return stepId;
+    };
+    const root = { children: steps.map((s) => add(s.data, scenarioSteps, s.id)) };
+    return { root, scenarioSteps, attachments: files(own), sharedSteps, sharedStepScenarioSteps, sharedStepAttachments };
+  };
 
   app.get("/__state", async () => state);
 
@@ -224,8 +275,62 @@ export function createTestOpsMock(options: TestOpsMockOptions = {}): { app: Fast
     state.layers.push(layer);
     return layer;
   });
-  app.get("/api/rs/status", async (request) => pageOf(statuses, request));
+  app.get("/api/rs/status", async (request) => {
+    const workflowId = (request.query as { workflowId?: string }).workflowId;
+    const workflow = workflowId ? workflows.find((w) => w.id === Number(workflowId)) : undefined;
+    return pageOf(workflow ? statuses.filter((s) => workflow.statusIds.includes(s.id)) : statuses, request);
+  });
+  app.post("/api/rs/status", async (request) => {
+    const status = { id: id(), ...(request.body as { name: string; color: string }) };
+    statuses.push(status);
+    return status;
+  });
   app.get("/api/rs/integration/project/:id", async (request) => pageOf(integrations[Number((request.params as { id: string }).id)] ?? [], request));
+  app.get("/api/rs/integration", async (request) => pageOf(instanceIntegrations, request));
+  app.post("/api/rs/integration/project", async (request, reply) => {
+    const { projectId, integrationId } = request.body as { projectId: number; integrationId: number };
+    const integration = instanceIntegrations.find((i) => i.id === integrationId);
+    if (!integration) {
+      return reply.status(404).send({ message: "Integration not found" });
+    }
+    (integrations[projectId] ??= []).push({ ...integration, disabled: false });
+    return { projectId, ...integration };
+  });
+  // Like Allure TestOps, the list of workflows does not carry their statuses.
+  app.get("/api/rs/workflow", async (request) => pageOf(workflows.map((w) => ({ id: w.id, name: w.name })), request));
+  app.post("/api/rs/workflow", async (request) => {
+    const body = request.body as { name: string; statuses: { id: number }[] };
+    const workflow = { id: id(), name: body.name, statusIds: body.statuses.map((s) => s.id) };
+    workflows.push(workflow);
+    return { id: workflow.id, name: workflow.name, statuses: statuses.filter((s) => workflow.statusIds.includes(s.id)) };
+  });
+  app.patch("/api/rs/workflow/:id", async (request) => {
+    const workflow = workflows.find((w) => w.id === Number((request.params as { id: string }).id))!;
+    workflow.statusIds = (request.body as { statuses: { id: number }[] }).statuses.map((s) => s.id);
+    return { id: workflow.id, name: workflow.name, statuses: statuses.filter((s) => workflow.statusIds.includes(s.id)) };
+  });
+  app.get("/api/rs/workflowschema", async (request) => {
+    const projectId = Number((request.query as { projectId: string }).projectId);
+    return pageOf(
+      workflowSchemas.filter((s) => s.projectId === projectId).map((s) => ({ ...s, workflow: { id: s.workflowId, name: workflows.find((w) => w.id === s.workflowId)?.name } })),
+      request,
+    );
+  });
+  app.post("/api/rs/workflowschema", async (request) => {
+    const schema = { id: id(), ...(request.body as { projectId: number; workflowId: number; type: string }) };
+    workflowSchemas.push(schema);
+    return schema;
+  });
+  app.patch("/api/rs/workflowschema/:id", async (request) => {
+    const schema = workflowSchemas.find((s) => s.id === Number((request.params as { id: string }).id))!;
+    schema.workflowId = (request.body as { workflowId: number }).workflowId;
+    return schema;
+  });
+  app.post("/api/rs/project", async (request) => {
+    const project = { id: id(), name: (request.body as { name: string }).name };
+    projects.push(project);
+    return project;
+  });
 
   app.get("/api/rs/tree", async (request) => {
     const projectId = Number((request.query as { projectId: string }).projectId);
@@ -268,8 +373,15 @@ export function createTestOpsMock(options: TestOpsMockOptions = {}): { app: Fast
     state.testCases.push(created);
     return created;
   });
-  app.patch("/api/rs/testcase/:id", async (request) => {
+  app.patch("/api/rs/testcase/:id", async (request, reply) => {
     const tc = testCase(request);
+    // Like Allure TestOps: the status must belong to the workflow of the case.
+    const patch = request.body as { statusId?: number; workflowId?: number };
+    const workflow = workflows.find((w) => w.id === (patch.workflowId ?? tc.workflowId ?? 1));
+    const statusId = patch.statusId ?? tc.statusId;
+    if (workflow && statusId !== null && statusId !== undefined && !workflow.statusIds.includes(statusId)) {
+      return reply.status(400).send({ message: `status (${statusId}) is not present in workflow (${workflow.id})` });
+    }
     Object.assign(tc, request.body as Partial<TestCase>);
     return tc;
   });
@@ -349,7 +461,43 @@ export function createTestOpsMock(options: TestOpsMockOptions = {}): { app: Fast
     tc.attachments.push(...created);
     return created;
   });
-  app.get("/api/rs/testcase/:id/step", async (request) => normalized(testCase(request).scenario));
+  app.get("/api/rs/testcase/:id/step", async (request) => normalized(testCase(request).scenario, testCase(request).attachments));
+  app.get("/api/rs/testcase/attachment/:id/content", async (request, reply) => {
+    const attachmentId = Number((request.params as { id: string }).id);
+    const file = state.testCases.flatMap((tc) => tc.attachments).find((a) => a.id === attachmentId);
+    return file ? reply.type("application/octet-stream").send(Buffer.from(`content of ${file.name}`)) : reply.status(404).send({ message: "Attachment not found" });
+  });
+  app.get("/api/rs/sharedstep/attachment/:id/content", async (request, reply) => {
+    const attachmentId = Number((request.params as { id: string }).id);
+    const file = state.sharedSteps.flatMap((s) => s.attachments).find((a) => a.id === attachmentId);
+    return file ? reply.type("application/octet-stream").send(Buffer.from(`content of ${file.name}`)) : reply.status(404).send({ message: "Attachment not found" });
+  });
+  /** The case page in one answer, from what the fake keeps. */
+  app.get("/api/rs/testcase/:id/overview", async (request) => {
+    const tc = testCase(request);
+    const roles: Record<number, string> = { [-1]: "Owner", 2: "Reviewer", 3: "Tester" };
+    const status = statuses.find((s) => s.id === tc.statusId) ?? null;
+    const workflow = workflows.find((w) => w.id === (tc.workflowId ?? 1))!;
+    return {
+      id: tc.id,
+      projectId: tc.projectId,
+      name: tc.name,
+      description: tc.description,
+      precondition: tc.precondition,
+      expectedResult: tc.expectedResult,
+      automated: tc.automated ?? false,
+      status,
+      workflow: { id: workflow.id, name: workflow.name, statuses: statuses.filter((s) => workflow.statusIds.includes(s.id)) },
+      layer: state.layers.find((l) => l.id === tc.testLayerId) ?? null,
+      tags: tc.tags.map((name, index) => ({ id: index + 1, name })),
+      links: tc.links,
+      issues: (tc.issues as { name: string; integrationId: number }[]).map((issue) => ({ ...issue, url: `https://jira.example.com/browse/${issue.name}` })),
+      testKeys: tc.testKeys,
+      customFields: tc.cfv.map((value) => ({ name: value.name, customField: { id: value.customField.id, name: state.customFields.find((f) => f.id === value.customField.id)?.name } })),
+      members: (tc.members as { name: string; role: { id: number } }[]).map((member) => ({ name: member.name, role: { id: member.role.id, name: roles[member.role.id] ?? "Role" } })),
+      examples: tc.examples,
+    };
+  });
   app.delete("/api/rs/testcase/step/:id", async (request) => {
     const stepId = Number((request.params as { id: string }).id);
     for (const tc of state.testCases) {
@@ -373,7 +521,11 @@ export function createTestOpsMock(options: TestOpsMockOptions = {}): { app: Fast
     state.sharedSteps.push(created);
     return created;
   });
-  app.get("/api/rs/sharedstep/:id/step", async (request) => normalized(sharedStep(request).scenario));
+  app.get("/api/rs/sharedstep/:id/step", async (request) => normalized(sharedStep(request).scenario, sharedStep(request).attachments));
+  app.get("/api/rs/sharedstep/:id", async (request) => {
+    const step = sharedStep(request);
+    return { id: step.id, name: step.name, projectId: step.projectId };
+  });
   app.delete("/api/rs/sharedstep/step/:id", async (request) => {
     const stepId = Number((request.params as { id: string }).id);
     for (const step of state.sharedSteps) {

@@ -8,6 +8,8 @@ export function runSource(profile: Profile): string {
       return `csv:${profile.csv.fileId ?? ""}`;
     case "xml":
       return `xml:${profile.xml.fileId ?? ""}#${profile.xml.caseElement ?? ""}`;
+    case "testops":
+      return `testops:${profile.testopsSource.connection.endpoint.replace(/\/+$/, "")}#${profile.testopsSource.projects.map((p) => p.sourceId).join(",")}`;
     case "qase":
       return `qase:${profile.qase.connection.endpoint.replace(/\/+$/, "")}#${profile.qase.scope.projectCode}`;
     case "xray":

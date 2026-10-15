@@ -38,6 +38,9 @@ function otherSettings(run: RunSummary, profile: Profile, currentFileName: strin
         if (isFileSource(profile.source)) {
           return `File "${context.sourceLabel}", the profile now uses ${currentFileName ? `"${currentFileName}"` : "another file"}.`;
         }
+        if (profile.source === "testops") {
+          return `${context.sourceLabel}, the profile now copies ${profile.testopsSource.projects.map((p) => p.sourceName).join(", ") || "no projects"}.`;
+        }
         if (profile.source === "qase") {
           return `${context.sourceLabel}, the profile now uses Qase project ${profile.qase.scope.projectCode || "?"}.`;
         }
@@ -59,6 +62,25 @@ function problems(profile: Profile): string[] {
   const has = (value: string) => value === SECRET_MASK || value.trim() !== "";
   if (!profile.testops.connection.endpoint || !has(profile.testops.connection.apiToken)) {
     list.push("The Allure TestOps connection is incomplete (Connections).");
+  }
+  if (profile.source === "testops") {
+    const source = profile.testopsSource;
+    if (!source.connection.endpoint || !has(source.connection.apiToken)) {
+      list.push("The connection to the source Allure TestOps is incomplete (Connections).");
+    }
+    if (source.projects.length === 0) {
+      list.push("Choose the projects to copy (Projects).");
+    }
+    if (source.projects.some((p) => !p.targetName.trim())) {
+      list.push("Enter a name for every target project (Projects).");
+    }
+    if (!source.manual && !source.automated) {
+      list.push("Choose manual or automated test cases, or both (Projects).");
+    }
+    if (!profile.options.migrationTagPrefix.trim()) {
+      list.push("Enter the migration tag prefix (Options).");
+    }
+    return list;
   }
   if (!profile.options.migrationTagPrefix.trim()) {
     list.push("Enter the migration tag prefix (Options).");
@@ -128,6 +150,13 @@ function problems(profile: Profile): string[] {
 
 function warnings(profile: Profile, sourceDepth: number | null): string[] {
   const list: string[] = [];
+  if (profile.source === "testops") {
+    // A copy keeps the structure, fields and steps of the source; only integrations need a choice.
+    if (Object.values(profile.testopsSource.integrations).some((target) => target === null)) {
+      list.push("Issues and test keys of some integrations are not migrated: no integration of the target is chosen for them (Projects).");
+    }
+    return list;
+  }
   if (profile.source === "csv" && !profile.csv.pathColumn) {
     if (!profile.csv.withoutPath) {
       list.push("No section path column is chosen, so cases will not be grouped into sections.");
@@ -350,7 +379,7 @@ export function RunStep() {
                         </Text>
                         <Group gap={6}>
                           <Text size="xs" c="dimmed">
-                            project #{run.context.testopsProjectId ?? "?"} · tag prefix{" "}
+                            {run.context.testopsProjectId ? `project #${run.context.testopsProjectId} · ` : ""}tag prefix{" "}
                             <Text span size="xs" className="mono">
                               {run.context.tagPrefix}
                             </Text>
@@ -402,9 +431,11 @@ export function RunStep() {
       <Modal opened={confirm} onClose={() => setConfirm(false)} title="Start the migration?">
         <Stack>
           <Text size="sm">
-            Test cases and custom fields{profile.source === "xml" && profile.xml.files.download ? " and attachments" : isFileSource(profile.source) ? "" : ", shared steps and attachments"} will be created or updated in
-            Allure TestOps project #{profile.testops.scope.projectId}.{" "}
-            {profile.source === "testrail" ? "TestRail is only read." : profile.source === "xray" ? "Jira and Xray are only read." : profile.source === "qase" ? "Qase is only read." : "The file is not changed."}
+            Test cases and custom fields{profile.source === "xml" && profile.xml.files.download ? " and attachments" : isFileSource(profile.source) ? "" : ", shared steps and attachments"} will be created or updated in{" "}
+            {profile.source === "testops"
+              ? `the target projects ${profile.testopsSource.projects.map((p) => `"${p.targetName}"`).join(", ")}; projects that do not exist yet are created.`
+              : `Allure TestOps project #${profile.testops.scope.projectId}.`}{" "}
+            {profile.source === "testrail" ? "TestRail is only read." : profile.source === "xray" ? "Jira and Xray are only read." : profile.source === "qase" ? "Qase is only read." : profile.source === "testops" ? "The source Allure TestOps is only read." : "The file is not changed."}
           </Text>
           <Group justify="flex-end">
             <Button variant="default" onClick={() => setConfirm(false)}>
@@ -579,11 +610,11 @@ function RunDetails({ profile, run, other }: { profile: Profile; run: RunSummary
                   ))}
                 {entry.caseId !== undefined && " "}
                 {entry.message}
-                {entry.targetId !== undefined && testopsProjectId && (
+                {entry.targetId !== undefined && (entry.targetProjectId ?? testopsProjectId) && (
                   <>
                     {" "}
                     <Anchor
-                      href={`${testopsBase}project/${testopsProjectId}/test-cases/${entry.targetId}`}
+                      href={`${testopsBase}project/${entry.targetProjectId ?? testopsProjectId}/test-cases/${entry.targetId}`}
                       target="_blank"
                       size="xs"
                       className="mono"

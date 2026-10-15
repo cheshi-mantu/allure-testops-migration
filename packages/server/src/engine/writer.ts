@@ -156,6 +156,7 @@ export class TestOpsWriter {
       precondition: await text(planned.precondition),
       expectedResult: await text(planned.expectedResult),
       links: planned.links,
+      ...(planned.automated === undefined ? {} : { automated: planned.automated }),
     };
     if (planned.layer) {
       try {
@@ -173,7 +174,38 @@ export class TestOpsWriter {
         });
       }
     }
-    if (planned.status) {
+    if (planned.workflow) {
+      // A status belongs to a workflow: both are set, the status only from that workflow.
+      const workflow = await this.targets.workflow(planned.workflow);
+      if (workflow) {
+        const status = planned.status ? workflow.statuses?.find((s) => s.name.toLowerCase() === planned.status!.toLowerCase()) : undefined;
+        if (status || !planned.status) {
+          patch.workflowId = workflow.id;
+          if (status) {
+            patch.statusId = status.id;
+          }
+        } else {
+          log("warn", `Status "${planned.status}" is not in workflow "${planned.workflow}"; the case keeps its workflow and status.`, {
+            key: `workflow-status:${planned.workflow}:${planned.status}`,
+            code: "workflow-status-missing",
+            level: "warn",
+            title: `Status "${planned.status}" is not in workflow "${planned.workflow}" of the target; these cases keep their workflow and status.`,
+            hint: `Add the status to the workflow in the target Allure TestOps (Administration, Workflows) and run again: migrated cases are updated.`,
+            fix: { step: "connections" },
+          });
+        }
+      } else {
+        log("warn", `Workflow "${planned.workflow}" does not exist; the project's workflow is kept.`, {
+          key: `workflow:${planned.workflow}`,
+          code: "workflow-missing",
+          level: "warn",
+          title: `Workflow "${planned.workflow}" does not exist in the target Allure TestOps; these cases keep the workflow of the project.`,
+          hint: "Workflows and their statuses are configured by an administrator and are not created by the migration. Create the workflow with the same name and statuses in the target (Administration, Workflows) and run again: migrated cases are updated.",
+          fix: { step: "connections" },
+        });
+      }
+    }
+    if (planned.status && !planned.workflow) {
       const status = await this.targets.status(planned.status);
       if (status) {
         patch.statusId = status.id;
@@ -429,6 +461,11 @@ export class TestOpsWriter {
         }
         continue;
       }
+      if (!step.body && !step.steps?.length && !step.data && !step.expected && step.attachments.length > 0) {
+        // A step that only holds files: the files themselves, as in the source.
+        result.push(...attachmentSteps(step.attachments));
+        continue;
+      }
       const nested: ToScenarioStep[] = [...attachmentSteps(step.attachments)];
       if (step.steps && step.steps.length > 0) {
         nested.push(...(await this.scenarioSteps(step.steps, uploaded, linkedCaseIds, log)));
@@ -484,7 +521,7 @@ export class TestOpsWriter {
       existing: () => this.testops.sharedStepAttachments(target.id),
       upload: (fileName, data, type) => this.testops.uploadSharedStepAttachment(target.id, fileName, data, type),
     };
-    const uploaded = await this.uploadAll(stepAttachments(planned), this.assets.attachments(null), uploader, log);
+    const uploaded = await this.uploadAll([...stepAttachments(planned), ...(shared.attachments ?? [])], this.assets.attachments(null), uploader, log);
     await this.testops.clearSharedStepScenario(target.id);
     const steps = await this.scenarioSteps(planned, uploaded, [], log);
     if (steps.length > 0) {

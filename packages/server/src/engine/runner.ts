@@ -12,6 +12,8 @@ import {
   type RunSummary,
 } from "@atm/shared";
 import { sharedRateLimiter, type RateLimiter } from "../http/rateLimiter.js";
+import { requireProjects, sourceClient } from "../fromtestops/source.js";
+import { WorkflowCloner } from "../fromtestops/workflows.js";
 import { QASE_WINDOW_MS, QaseClient, qaseRequestsPerWindow } from "../qase/client.js";
 import { TestOpsClient } from "../testops/client.js";
 import { discoverTestOps, requireTestOpsProject } from "../testops/discovery.js";
@@ -40,8 +42,14 @@ export class Run {
   /** Cases that failed on the server side and get a second attempt at the end. */
   private readonly retried = new Set<string>();
 
+  /** Target project of the case being migrated, for links in the log when a run writes to several projects. */
+  private targetProject: number | null = null;
+  /** Copies of another Allure TestOps: workflows and statuses of the source, created in the target when missing. */
+  private workflowCloner: WorkflowCloner | null = null;
+
   constructor(
-    private readonly profile: Profile,
+    /** For a run over several projects, the profile of the project being migrated. */
+    private profile: Profile,
     dryRun: boolean,
     private readonly store: RunStore,
     private readonly deps: RunDeps,
@@ -77,7 +85,16 @@ export class Run {
   }
 
   log(level: LogLevel, message: string, caseId?: string, targetId?: number, problem?: string) {
-    const entry: RunLogEntry = { seq: ++this.seq, time: new Date().toISOString(), level, message, caseId, targetId, problem };
+    const entry: RunLogEntry = {
+      seq: ++this.seq,
+      time: new Date().toISOString(),
+      level,
+      message,
+      caseId,
+      targetId,
+      problem,
+      ...(targetId !== undefined && this.targetProject !== null ? { targetProjectId: this.targetProject } : {}),
+    };
     this.pendingLog.push(entry);
     this.listeners.forEach((listener) => listener({ type: "log", entry }));
     this.flushSoon();
@@ -213,9 +230,18 @@ export class Run {
         this.summary.context!.sourceLabel = file.name;
       }
     }
-    const log = (level: "info" | "warn", message: string, caseId?: string) => this.log(level, message, caseId);
     this.phase(
-      profile.source === "csv" ? "Reading the CSV file" : profile.source === "xml" ? "Reading the XML file" : profile.source === "xray" ? "Connecting to Jira and Xray" : profile.source === "qase" ? "Connecting to Qase" : "Connecting to TestRail",
+      profile.source === "csv"
+        ? "Reading the CSV file"
+        : profile.source === "xml"
+          ? "Reading the XML file"
+          : profile.source === "xray"
+            ? "Connecting to Jira and Xray"
+            : profile.source === "qase"
+              ? "Connecting to Qase"
+              : profile.source === "testops"
+                ? "Connecting to both Allure TestOps instances"
+                : "Connecting to TestRail",
     );
     if (profile.source === "testrail") {
       const perMinute = testRailRequestsPerMinute(profile.testrail.connection);
@@ -237,19 +263,181 @@ export class Run {
     }
     const retryLog = (service: string) => (info: RetryInfo) =>
       this.log("warn", `${service}: ${info.url} failed (${info.reason}); retry ${info.attempt} of ${info.of} in ${Math.max(1, Math.round(info.delayMs / 1000))}s.`);
-    const source = await prepareSource(profile, this.deps, log, retryLog(profile.source === "xray" ? "Jira or Xray" : profile.source === "qase" ? "Qase" : "TestRail"));
+    if (profile.source === "testops") {
+      await this.workTestOps(retryLog);
+      return;
+    }
+    await this.runProject(retryLog);
+  }
+
+  /**
+   * Another Allure TestOps as the source: its chosen projects one after another, each into a
+   * project of the target with the same name, found or created.
+   */
+  private async workTestOps(retryLog: (service: string) => (info: RetryInfo) => void) {
+    const original = this.profile;
+    requireProjects(original);
+    const sourceTestOps = sourceClient(original, retryLog("Source Allure TestOps"));
+    const testops = new TestOpsClient(original.testops.connection, undefined, retryLog("Allure TestOps"));
+    const targetProjects = await testops.projects();
+    const targetIntegrations = await testops.instanceIntegrations().catch(() => []);
+    this.workflowCloner = new WorkflowCloner(sourceTestOps, testops, this.summary.dryRun, (level, message) => this.log(level, message));
+    const pairs = original.testopsSource.projects;
+    for (const [index, pair] of pairs.entries()) {
+      this.checkCancelled();
+      this.phase(`Project ${index + 1} of ${pairs.length}: ${pair.sourceName} → ${pair.targetName}`);
+      let project = targetProjects.find((p) => p.name === pair.targetName) ?? null;
+      if (project) {
+        this.log("info", `Target project "${project.name}" (#${project.id}) exists: its cases are found by their migration tag and updated.`);
+      } else if (this.summary.dryRun) {
+        this.log("info", `Target project "${pair.targetName}" will be created.`);
+      } else {
+        try {
+          project = await testops.createProject(pair.targetName);
+        } catch (error) {
+          throw new OperationFailed("create the project", error);
+        }
+        targetProjects.push(project);
+        this.log("info", `Created target project "${project.name}" (#${project.id}).`);
+      }
+
+      // Integrations the source project uses, through the integrations chosen for them in the target.
+      const used = await sourceTestOps.projectIntegrations(pair.sourceId).catch(() => []);
+      const wanted = [...new Set(used.map((i) => original.testopsSource.integrations[String(i.id)]).filter((id): id is number => typeof id === "number"))];
+      const enabled = new Set(project ? (await testops.projectIntegrations(project.id).catch(() => [])).map((i) => i.id) : []);
+      for (const id of wanted.filter((id) => !enabled.has(id))) {
+        const name = targetIntegrations.find((i) => i.id === id)?.name ?? `#${id}`;
+        if (!project || this.summary.dryRun) {
+          this.log("info", `Integration "${name}" will be added to project "${pair.targetName}".`);
+          continue;
+        }
+        try {
+          await testops.addIntegrationToProject(project.id, id);
+          this.log("info", `Added integration "${name}" to project "${project.name}".`);
+        } catch (error) {
+          const explanation = explain(error, "add the integration", { profile: original, service: "Allure TestOps" });
+          this.report("warn", `Integration "${name}" was not added to project "${project.name}": ${explanation.title}`, {
+            ...explanation,
+            key: `integration-not-added:${id}`,
+            code: "integration-not-added",
+            level: "warn",
+            title: `Integration "${name}" could not be added to the target project "${project.name}".`,
+            hint: `${explanation.hint} Add it in the settings of the project (Integrations) and run again: issues and test keys of that integration are set on the rerun.`,
+          });
+        }
+      }
+
+      // Trees of the source project, built from custom fields with the same names.
+      const trees = await sourceTestOps.trees(pair.sourceId).catch(() => []);
+      if (trees.length > 0) {
+        const existing = project ? new Set((await testops.trees(project.id).catch(() => [])).map((tree) => tree.name)) : new Set<string>();
+        const resolver = project ? new TargetResolver(testops, project.id, (level, message) => this.log(level, message)) : null;
+        // A tree may list its fields by id only: their names come from the fields of the project.
+        const fieldNames = new Map((await sourceTestOps.projectCustomFields(pair.sourceId).catch(() => [])).map((field) => [field.id, field.name]));
+        for (const tree of trees.filter((tree) => !existing.has(tree.name))) {
+          const fields = (tree.fields ?? []).map((field) => field.name ?? fieldNames.get(field.id)).filter((name): name is string => Boolean(name));
+          if (fields.length < (tree.fields ?? []).length) {
+            this.log("warn", `Tree "${tree.name}" is not copied: some of its custom fields are not in the source project.`);
+            continue;
+          }
+          if (!resolver || this.summary.dryRun) {
+            this.log("info", `Tree "${tree.name}" (${fields.join(" → ")}) will be created.`);
+            continue;
+          }
+          try {
+            const ids = [];
+            for (const field of fields) {
+              ids.push((await resolver.customField(field)).id);
+            }
+            await testops.createTree(project!.id, tree.name, ids);
+            this.log("info", `Created tree "${tree.name}": ${fields.join(" → ")}.`);
+          } catch (error) {
+            const explanation = explain(error, "create the tree", { profile: original, service: "Allure TestOps" });
+            this.report("warn", `Tree "${tree.name}" was not created: ${explanation.title}`, { ...explanation, key: `tree:${tree.name}`, code: "tree-not-created", level: "warn" });
+          }
+        }
+      }
+
+      // Which workflow manual and automated cases follow: the same as in the source.
+      for (const schema of await sourceTestOps.workflowSchemas(pair.sourceId).catch(() => [])) {
+        const workflow = await this.workflowCloner.ensure(schema.workflow.name);
+        if (!workflow) {
+          continue;
+        }
+        if (!project || this.summary.dryRun) {
+          this.log("info", `${schema.type} test cases of project "${pair.targetName}" will follow workflow "${workflow.name}".`);
+          continue;
+        }
+        try {
+          const existing = (await testops.workflowSchemas(project.id)).find((s) => s.type.toLowerCase() === schema.type.toLowerCase());
+          if (existing?.workflow.id === workflow.id) {
+            continue;
+          }
+          if (existing) {
+            await testops.setWorkflowSchema(existing.id, workflow.id);
+          } else {
+            await testops.createWorkflowSchema(project.id, workflow.id, schema.type);
+          }
+          this.log("info", `${schema.type} test cases of project "${project.name}" follow workflow "${workflow.name}".`);
+        } catch (error) {
+          const explanation = explain(error, "set the workflow", { profile: original, service: "Allure TestOps" });
+          this.report("warn", `The workflow of ${schema.type} test cases of project "${project.name}" was not set: ${explanation.title}`, {
+            ...explanation,
+            key: `workflow-schema:${schema.type}`,
+            code: "workflow-schema-not-set",
+            level: "warn",
+            hint: `${explanation.hint} Choose the workflow in the settings of the project (Workflows) if needed.`,
+          });
+        }
+      }
+
+      this.profile = {
+        ...original,
+        testops: { ...original.testops, scope: { projectId: project?.id ?? null } },
+        testopsSource: { ...original.testopsSource, projects: [pair] },
+      };
+      this.targetProject = project?.id ?? null;
+      try {
+        await this.runProject(retryLog, project === null);
+      } finally {
+        this.profile = original;
+        this.targetProject = null;
+      }
+    }
+  }
+
+  /** Reads the cases of the source and migrates them into one target project, or checks them on a dry run. */
+  private async runProject(retryLog: (service: string) => (info: RetryInfo) => void, targetMissing = false) {
+    const profile = this.profile;
+    const log = (level: "info" | "warn", message: string, caseId?: string) => this.log(level, message, caseId);
+    const source = await prepareSource(
+      profile,
+      this.deps,
+      log,
+      retryLog(profile.source === "xray" ? "Jira or Xray" : profile.source === "qase" ? "Qase" : profile.source === "testops" ? "Source Allure TestOps" : "TestRail"),
+    );
+
+    if (targetMissing) {
+      // A dry run for a project that is created on the migration: the cases are converted, the target is not checked.
+      this.phase(`Reading test cases from ${source.name}`);
+      const cases = await source.readCases(log, () => this.cancelled);
+      this.summary.counters.total += cases.length;
+      this.emitSummary();
+      await this.dryRun(cases, source, null);
+      return;
+    }
 
     this.phase("Connecting to Allure TestOps");
     const projectId = requireTestOpsProject(profile);
     const testops = new TestOpsClient(profile.testops.connection, undefined, retryLog("Allure TestOps"));
     const project = await testops.project(projectId);
     this.log("info", `Target project: ${project.name} (#${project.id}).`);
-    const targets = new TargetResolver(testops, projectId, (level, message) => this.log(level, message));
+    const targets = new TargetResolver(testops, projectId, (level, message) => this.log(level, message), this.workflowCloner ?? undefined);
 
     this.checkCancelled();
     this.phase(`Reading test cases from ${source.name}`);
     const cases = await source.readCases(log, () => this.cancelled);
-    this.summary.counters.total = cases.length;
+    this.summary.counters.total += cases.length;
     this.log("info", `${cases.length} test case(s) to migrate.`);
     this.emitSummary();
 
@@ -360,7 +548,7 @@ export class Run {
     }
   }
 
-  private async dryRun(cases: SourceCase[], source: PreparedSource, testops: TestOpsClient) {
+  private async dryRun(cases: SourceCase[], source: PreparedSource, testops: TestOpsClient | null) {
     this.phase("Checking conversion");
     const fieldValues = new Map<string, Set<string>>();
     // Value -> cases using it, so missing objects in Allure TestOps can be reported per case.
@@ -370,6 +558,7 @@ export class Run {
     const members = new Map<string, SourceCase[]>();
     const roles = new Map<string, SourceCase[]>();
     const sharedSteps = new Set<number>();
+    const workflows = new Set<string>();
     let attachments = 0;
     const count = (map: Map<string, SourceCase[]>, key: string | null, testCase: SourceCase) => {
       if (key) {
@@ -397,6 +586,9 @@ export class Run {
           count(roles, member.role, testCase);
         });
         planned.scenario.forEach((step) => step.type === "shared" && sharedSteps.add(step.sourceId));
+        if (planned.workflow) {
+          workflows.add(planned.workflow);
+        }
         attachments += planned.attachments.length;
       } catch (error) {
         if (error instanceof CaseSkipped) {
@@ -426,6 +618,14 @@ export class Run {
       }
     }
 
+    // Workflows of the cases that the target lacks, or whose statuses it lacks: logged as created.
+    for (const name of workflows) {
+      await this.workflowCloner?.ensure(name);
+    }
+    if (!testops) {
+      this.log("info", "The target project does not exist yet, so custom fields, layers, statuses and users are checked when it is migrated.");
+      return;
+    }
     this.phase("Checking the Allure TestOps project");
     const target = await discoverTestOps(this.profile, testops);
     target.warnings.forEach((warning) => this.log("warn", warning));
@@ -486,7 +686,8 @@ export class Run {
     }
     const fieldOf = (kind: string) => fieldFor(this.profile, (t) => t.kind === kind);
     for (const [name, affected] of statuses) {
-      if (!target.statuses.some((status) => status.name.toLowerCase() === name.toLowerCase())) {
+      // A copy of another Allure TestOps creates missing statuses with their workflows.
+      if (this.workflowCloner === null && !target.statuses.some((status) => status.name.toLowerCase() === name.toLowerCase())) {
         for (const testCase of affected) {
           this.report("warn", `Status "${name}" does not exist in Allure TestOps; ${affected.length} case(s) would keep the default status.`, {
             key: `status:${name}`,
@@ -617,6 +818,8 @@ function sourceLabelOf(profile: Profile): string {
       return "XML file";
     case "qase":
       return `Qase project ${profile.qase.scope.projectCode || "?"}`;
+    case "testops":
+      return `Allure TestOps ${profile.testopsSource.connection.endpoint.replace(/^https?:\/\//, "").replace(/\/+$/, "") || "?"}: ${profile.testopsSource.projects.map((p) => p.sourceName).join(", ") || "no projects"}`;
     case "xray": {
       const jql = profile.xray.scope.jql.trim();
       return `Xray project ${profile.xray.scope.projectKey || "?"}${jql ? ` (${jql})` : ""}`;

@@ -32,6 +32,8 @@ import { HttpError } from "../http/httpClient.js";
 import { prepareSource } from "../engine/sources.js";
 import type { FileStore } from "../storage/fileStore.js";
 import { checkQase, checkTestOps, checkTestRail, checkXray } from "./checks.js";
+import { discoverFromTestOps, fromTestOpsContext, readTestCase, sourceClient, wantedByType } from "../fromtestops/source.js";
+import { transformTestOpsCase } from "../fromtestops/transform.js";
 import { discoverQase, loadQaseContext, parseQaseCaseId, readQaseCase } from "../qase/discovery.js";
 import { QaseClient } from "../qase/client.js";
 import { suitePath, transformQaseCase } from "../qase/transform.js";
@@ -119,6 +121,7 @@ export async function registerApi(app: FastifyInstance, deps: ApiDeps): Promise<
         testrailEndpoint: profile.testrail.connection.endpoint,
         xrayProject: profile.xray.scope.projectKey,
         qaseProject: profile.qase.scope.projectCode,
+        testopsProjects: profile.testopsSource.projects.map((p) => p.sourceName),
         testopsEndpoint: profile.testops.connection.endpoint,
         lastRun: (await runs.list(profile.id))[0] ?? null,
       })),
@@ -192,6 +195,37 @@ export async function registerApi(app: FastifyInstance, deps: ApiDeps): Promise<
   app.post<{ Params: { id: string } }>("/api/profiles/:id/testops/check", async (request) => checkTestOps(await load(request.params.id)));
   app.post<{ Params: { id: string } }>("/api/profiles/:id/xray/check", async (request) => checkXray(await load(request.params.id)));
   app.post<{ Params: { id: string } }>("/api/profiles/:id/qase/check", async (request) => checkQase(await load(request.params.id)));
+  /** The source Allure TestOps: the same check as for the target, with the source connection. */
+  app.post<{ Params: { id: string } }>("/api/profiles/:id/testops-source/check", async (request) => {
+    const profile = await load(request.params.id);
+    return checkTestOps({ ...profile, testops: { ...profile.testops, connection: profile.testopsSource.connection } });
+  });
+  /**
+   * Integrations the chosen source projects use, with the integrations of the target to choose from;
+   * an integration of the target with the same name and type is suggested.
+   */
+  app.get<{ Params: { id: string } }>("/api/profiles/:id/testops-source/integrations", async (request) => {
+    const profile = await load(request.params.id);
+    const source = sourceClient(profile);
+    const used = new Map<number, { id: number; name: string; type: string | null; projects: string[] }>();
+    for (const pair of profile.testopsSource.projects) {
+      for (const integration of await source.projectIntegrations(pair.sourceId)) {
+        const entry = used.get(integration.id) ?? { id: integration.id, name: integration.name, type: integration.info?.type ?? null, projects: [] };
+        entry.projects.push(pair.sourceName);
+        used.set(integration.id, entry);
+      }
+    }
+    const target = profile.testops.connection.endpoint && profile.testops.connection.apiToken
+      ? (await new TestOpsClient(profile.testops.connection).instanceIntegrations()).map((i) => ({ id: i.id, name: i.name, type: i.info?.type ?? null }))
+      : [];
+    return {
+      source: [...used.values()].map((integration) => ({
+        ...integration,
+        suggested: target.find((t) => t.name === integration.name && t.type === integration.type)?.id ?? target.find((t) => t.name === integration.name)?.id ?? null,
+      })),
+      target,
+    };
+  });
   /** Suites of the chosen Qase project with their full paths, to narrow a migration. */
   app.get<{ Params: { id: string } }>("/api/profiles/:id/qase/suites", async (request) => {
     const profile = await load(request.params.id);
@@ -225,6 +259,8 @@ export async function registerApi(app: FastifyInstance, deps: ApiDeps): Promise<
         return discoverXray(profile);
       case "qase":
         return discoverQase(profile);
+      case "testops":
+        return discoverFromTestOps(profile);
       default:
         return discoverTestRail(profile);
     }
@@ -318,6 +354,34 @@ export async function registerApi(app: FastifyInstance, deps: ApiDeps): Promise<
       } catch (error) {
         throw error instanceof CaseSkipped ? Object.assign(error, { statusCode: 422 }) : error;
       }
+    }
+    if (profile.source === "testops") {
+      const id = Number(rawId.replace(/^#/, ""));
+      if (!Number.isInteger(id) || id <= 0) {
+        throw Object.assign(new Error(`"${rawId}" is not an Allure TestOps test case id.`), { statusCode: 400 });
+      }
+      const client = sourceClient(profile);
+      const testCase = await readTestCase(client, id).catch((error: unknown) => {
+        throw error instanceof HttpError && error.status === 404 ? Object.assign(new Error(`Test case #${id} is not in the source Allure TestOps.`), { statusCode: 404 }) : error;
+      });
+      const { planned, linkedCaseIds } = transformTestOpsCase(testCase, await fromTestOpsContext(profile, client));
+      if (!wantedByType(profile, testCase.overview.automated)) {
+        planned.notes.push({
+          code: "testops-type-left-out",
+          text: `This is ${testCase.overview.automated ? "an automated" : "a manual"} test case, and ${testCase.overview.automated ? "automated" : "manual"} cases are not migrated.`,
+          hint: "Turn them on on the Projects step if it should be migrated.",
+          fix: { step: "scope" },
+        });
+      }
+      if (!profile.testopsSource.projects.some((p) => p.sourceId === testCase.overview.projectId)) {
+        planned.notes.push({
+          code: "testops-other-project",
+          text: `Test case #${id} belongs to a project that is not chosen for migration.`,
+          hint: "Choose its project on the Projects step if it should be migrated.",
+          fix: { step: "scope" },
+        });
+      }
+      return { ...normalizePlanned(planned), linkedCaseIds };
     }
     if (profile.source === "qase") {
       const context = await loadQaseContext(profile);

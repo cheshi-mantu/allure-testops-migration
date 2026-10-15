@@ -1,4 +1,4 @@
-import type { TestOpsClient, ToNamed } from "../testops/client.js";
+import type { TestOpsClient, ToNamed, ToWorkflow } from "../testops/client.js";
 import { OperationFailed } from "./problems.js";
 
 type Logger = (level: "info" | "warn", message: string) => void;
@@ -17,11 +17,14 @@ export class TargetResolver {
   /** Username by username and by lower-case email. */
   private accounts: Promise<Map<string, string> | null> | null = null;
   private roleList: Promise<ToNamed[]> | null = null;
+  private workflowList: Promise<ToWorkflow[]> | null = null;
 
   constructor(
     private readonly client: TestOpsClient,
     private readonly projectId: number,
     private readonly log: Logger,
+    /** Finds a workflow by name and, for a copy of another Allure TestOps, creates or completes it. */
+    private readonly workflows?: { ensure(name: string): Promise<ToWorkflow | null> },
   ) {}
 
   customField(name: string): Promise<ToNamed> {
@@ -106,6 +109,20 @@ export class TargetResolver {
   async role(name: string): Promise<ToNamed | null> {
     this.roleList ??= this.client.roles().catch(() => []);
     return (await this.roleList).find((r) => r.name.toLowerCase() === name.trim().toLowerCase()) ?? null;
+  }
+
+  /** Workflows are configured by an administrator and are not created by the migration. */
+  async workflow(name: string): Promise<ToWorkflow | null> {
+    if (this.workflows) {
+      return this.workflows.ensure(name);
+    }
+    this.workflowList ??= this.client.workflows().catch(() => []);
+    const workflow = (await this.workflowList).find((w) => w.name.toLowerCase() === name.trim().toLowerCase());
+    if (workflow && !workflow.statuses?.length) {
+      // Some versions list workflows without their statuses.
+      workflow.statuses = await this.client.allStatuses(workflow.id).catch(() => []);
+    }
+    return workflow ?? null;
   }
 
   /** Statuses belong to workflows and are not created by the migration. */
