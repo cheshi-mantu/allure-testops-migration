@@ -243,6 +243,44 @@ const QASE_STEPS: StepDef[] = [
   },
 ];
 
+const ALM_STEPS: StepDef[] = [
+  {
+    key: "connections",
+    label: "Connections",
+    description: "ALM and Allure TestOps access",
+    icon: <IconPlugConnected size={16} />,
+    done: (p) =>
+      Boolean(p.alm.connection.endpoint) &&
+      (p.alm.connection.auth === "apiKey" ? Boolean(p.alm.connection.clientId) && hasSecret(p.alm.connection.secret) : Boolean(p.alm.connection.username) && hasSecret(p.alm.connection.password)) &&
+      Boolean(p.testops.connection.endpoint && hasSecret(p.testops.connection.apiToken)),
+    render: () => <ConnectionsStep />,
+  },
+  {
+    key: "scope",
+    label: "Projects",
+    description: "Which tests and where",
+    icon: <IconTarget size={16} />,
+    done: (p) => Boolean(p.alm.scope.domain && p.alm.scope.project && p.testops.scope.projectId),
+    render: () => <ScopeStep />,
+  },
+  {
+    key: "structure",
+    label: "Folders",
+    description: "Test Plan folders → custom fields",
+    icon: <IconHierarchy2 size={16} />,
+    done: (p) => p.structure.levels.some(Boolean),
+    render: () => <StructureStep />,
+  },
+  {
+    key: "fields",
+    label: "Fields",
+    description: "ALM fields → Allure TestOps",
+    icon: <IconListDetails size={16} />,
+    done: (p) => p.fields.length > 0,
+    render: () => <FieldsStep />,
+  },
+];
+
 const TESTOPS_SOURCE_STEPS: StepDef[] = [
   {
     key: "connections",
@@ -292,7 +330,7 @@ const COMMON_STEPS: StepDef[] = [
 ];
 
 function stepsFor(profile: Profile): StepDef[] {
-  const sourceSteps = profile.source === "csv" ? CSV_STEPS : profile.source === "xml" ? XML_STEPS : profile.source === "xray" ? XRAY_STEPS : profile.source === "qase" ? QASE_STEPS : profile.source === "testops" ? TESTOPS_SOURCE_STEPS : TESTRAIL_STEPS;
+  const sourceSteps = profile.source === "csv" ? CSV_STEPS : profile.source === "xml" ? XML_STEPS : profile.source === "xray" ? XRAY_STEPS : profile.source === "qase" ? QASE_STEPS : profile.source === "alm" ? ALM_STEPS : profile.source === "testops" ? TESTOPS_SOURCE_STEPS : TESTRAIL_STEPS;
   return [...sourceSteps, ...COMMON_STEPS];
 }
 

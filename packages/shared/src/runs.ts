@@ -12,6 +12,8 @@ export function runSource(profile: Profile): string {
       return `testops:${profile.testopsSource.connection.endpoint.replace(/\/+$/, "")}#${profile.testopsSource.projects.map((p) => p.sourceId).join(",")}`;
     case "qase":
       return `qase:${profile.qase.connection.endpoint.replace(/\/+$/, "")}#${profile.qase.scope.projectCode}`;
+    case "alm":
+      return `alm:${profile.alm.connection.endpoint.replace(/\/+$/, "")}#${profile.alm.scope.domain}#${profile.alm.scope.project}`;
     case "xray":
       return `xray:${profile.xray.connection.jiraUrl.replace(/\/+$/, "")}#${profile.xray.scope.projectKey}#${profile.xray.scope.jql.trim()}`;
     default:

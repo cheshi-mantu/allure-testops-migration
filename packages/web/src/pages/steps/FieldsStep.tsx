@@ -192,6 +192,7 @@ function FieldsEditor() {
   const nameColumns = profile.fields.filter((m) => m.target.kind === "name").map((m) => m.source);
   const xray = profile.source === "xray";
   const qase = profile.source === "qase";
+  const alm = profile.source === "alm";
   const longText = (f: TestRailFieldInfo) => ["text", "steps", "url"].includes(f.kind);
   const groups: { title: string; hint: string; fields: TestRailFieldInfo[] }[] = csv
     ? [
@@ -239,7 +240,7 @@ function FieldsEditor() {
     },
     {
       title: "Fields with a list of values",
-      hint: `Each value can be renamed or skipped. Values not listed in the mapping keep their ${qase ? "Qase" : "TestRail"} name.`,
+      hint: `Each value can be renamed or skipped. Values not listed in the mapping keep their ${qase ? "Qase" : alm ? "ALM" : "TestRail"} name.`,
       fields: visible.filter((f) => f.options !== null && !longText(f)),
     },
     {
@@ -258,6 +259,8 @@ function FieldsEditor() {
             ? `Choose where each ${unit} goes. Examples and counts come from all ${discovery.sampledCases} case(s) of the file.`
             : xray
               ? `Choose where each attribute of the Xray tests goes: Xray details and every Jira field used by the tests. Examples and counts come from ${discovery.sampledCases} sampled test(s).`
+              : alm
+                ? `Choose where each field of the ALM tests goes: design steps, parameters, system fields and the user fields of the project, by the labels the project gave them. Examples and counts come from ${discovery.sampledCases} sampled test(s).`
               : qase
                 ? `Choose where each attribute of the Qase cases goes: system fields, tags, parameters and the custom fields of the project. Examples and counts come from ${discovery.sampledCases} sampled case(s).`
                 : `Choose where each TestRail field goes. Examples and counts come from ${discovery.sampledCases} sampled case(s) of the selected suites.`}
@@ -364,7 +367,7 @@ function FieldRow({
               </Tooltip>
             )}
             {!field.system && field.kind !== "column" && !xml && (
-              <Tooltip label={profile.source === "xray" ? "Custom field in Jira" : profile.source === "qase" ? "Custom field in Qase" : "Custom field in TestRail"}>
+              <Tooltip label={profile.source === "xray" ? "Custom field in Jira" : profile.source === "qase" ? "Custom field in Qase" : profile.source === "alm" ? "User field of the ALM project" : "Custom field in TestRail"}>
                 <Badge size="xs" variant="dot" color="gray">
                   custom
                 </Badge>
@@ -465,7 +468,12 @@ function FieldRow({
               />
             )}
             {target.kind === "scenario" && field.kind === "column" && <StepFormatSettings />}
-            {target.kind === "examples" && (
+            {target.kind === "examples" && field.systemName === "alm:parameters" && (
+              <Text size="xs" c="dimmed">
+                ALM keeps one default value per parameter, so a test gets one example with the default values; the values of each run are set in ALM test sets.
+              </Text>
+            )}
+            {target.kind === "examples" && field.systemName !== "alm:parameters" && (
               <Text size="xs" c="dimmed">
                 Every combination of the parameter values becomes an example of the case; parameters of a group change together. More than 100
                 combinations stay in the description as text.
@@ -635,7 +643,7 @@ function ValueTable({
     <Table mt="sm" verticalSpacing={4}>
       <Table.Thead>
         <Table.Tr>
-          <Table.Th>{profile.source === "csv" ? "CSV value" : profile.source === "xml" ? "Value in the file" : profile.source === "xray" ? "Jira or Xray value" : profile.source === "qase" ? "Qase value" : "TestRail value"}</Table.Th>
+          <Table.Th>{profile.source === "csv" ? "CSV value" : profile.source === "xml" ? "Value in the file" : profile.source === "xray" ? "Jira or Xray value" : profile.source === "qase" ? "Qase value" : profile.source === "alm" ? "ALM value" : "TestRail value"}</Table.Th>
           <Table.Th w={90}>In sample</Table.Th>
           <Table.Th w="45%">Allure TestOps value</Table.Th>
           <Table.Th w={90}>Skip</Table.Th>

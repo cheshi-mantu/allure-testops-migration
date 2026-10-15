@@ -63,6 +63,7 @@ export const api = {
   checkTestOps: (id: string) => request<CheckResult>("POST", `/api/profiles/${id}/testops/check`),
   checkXray: (id: string) => request<CheckResult>("POST", `/api/profiles/${id}/xray/check`),
   checkQase: (id: string) => request<CheckResult>("POST", `/api/profiles/${id}/qase/check`),
+  checkAlm: (id: string) => request<CheckResult>("POST", `/api/profiles/${id}/alm/check`),
   checkTestOpsSource: (id: string) => request<CheckResult>("POST", `/api/profiles/${id}/testops-source/check`),
   testOpsSourceIntegrations: (id: string) =>
     request<{
@@ -70,6 +71,7 @@ export const api = {
       target: { id: number; name: string; type: string | null }[];
     }>("GET", `/api/profiles/${id}/testops-source/integrations`),
   qaseSuites: (id: string) => request<NamedId[]>("GET", `/api/profiles/${id}/qase/suites`),
+  almFolders: (id: string) => request<NamedId[]>("GET", `/api/profiles/${id}/alm/folders`),
   checkXmlFiles: (id: string) => request<ConnectionCheck>("POST", `/api/profiles/${id}/xml/files/check`),
   testRailSuites: (id: string) => request<{ suiteMode: number; suites: NamedId[] }>("GET", `/api/profiles/${id}/testrail/suites`),
   discoverSource: (id: string) => request<SourceDiscovery>("POST", `/api/profiles/${id}/source/discover`),

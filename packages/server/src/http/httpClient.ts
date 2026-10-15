@@ -30,6 +30,8 @@ export interface HttpClientOptions {
   onRetry?: (info: RetryInfo) => void;
   /** Test seam. */
   sleep?: (ms: number) => Promise<void>;
+  /** Keeps cookies the server sets and sends them back, for APIs with a login session. */
+  cookies?: boolean;
 }
 
 export interface RetryInfo {
@@ -66,6 +68,7 @@ export class HttpClient {
   private readonly retries: number;
   private readonly timeoutMs: number;
   private readonly sleep: (ms: number) => Promise<void>;
+  private readonly cookies: Map<string, string> | null;
 
   constructor(options: HttpClientOptions) {
     this.baseUrl = withTrailingSlash(options.baseUrl);
@@ -76,6 +79,42 @@ export class HttpClient {
     this.sleep = options.sleep ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms)));
     this.rateLimiter = options.rateLimiter;
     this.onRetry = options.onRetry;
+    this.cookies = options.cookies ? new Map() : null;
+  }
+
+  /** Forgets the cookies of a session, e.g. after logging out. */
+  clearCookies(): void {
+    this.cookies?.clear();
+  }
+
+  /** Names of the cookies the server has set. */
+  cookieNames(): string[] {
+    return [...(this.cookies?.keys() ?? [])];
+  }
+
+  cookie(name: string): string | undefined {
+    return this.cookies?.get(name);
+  }
+
+  private keepCookies(response: Response): void {
+    if (!this.cookies) {
+      return;
+    }
+    for (const header of response.headers.getSetCookie()) {
+      const [pair, ...attributes] = header.split(";");
+      const at = pair!.indexOf("=");
+      if (at <= 0) {
+        continue;
+      }
+      const name = pair!.slice(0, at).trim();
+      const value = pair!.slice(at + 1).trim();
+      const expired = attributes.some((attribute) => /^\s*max-age\s*=\s*0\s*$/i.test(attribute) || (/^\s*expires\s*=/i.test(attribute) && Date.parse(attribute.split("=").slice(1).join("=")) < Date.now()));
+      if (expired || value === "") {
+        this.cookies.delete(name);
+      } else {
+        this.cookies.set(name, value);
+      }
+    }
   }
 
   /**
@@ -96,8 +135,8 @@ export class HttpClient {
     return url;
   }
 
-  async json<T>(method: string, path: string, options: { query?: Query; body?: unknown } = {}): Promise<T> {
-    const init: RequestInit = { method, headers: { Accept: "application/json" } };
+  async json<T>(method: string, path: string, options: { query?: Query; body?: unknown; headers?: Record<string, string> } = {}): Promise<T> {
+    const init: RequestInit = { method, headers: { Accept: "application/json", ...(options.headers ?? {}) } };
     if (options.body !== undefined) {
       init.headers = { ...init.headers, "Content-Type": "application/json" } as Record<string, string>;
       init.body = JSON.stringify(options.body);
@@ -132,6 +171,10 @@ export class HttpClient {
     this.headers[name] = value;
   }
 
+  removeHeader(name: string): void {
+    delete this.headers[name];
+  }
+
   async upload<T>(path: string, query: Query, files: { field: string; name: string; data: Buffer; contentType: string }[]): Promise<T> {
     // FormData cannot be replayed after a failed attempt, so build a fresh one for each try.
     const response = await this.send(this.url(path, query), () => {
@@ -150,9 +193,10 @@ export class HttpClient {
     let attempt = 0;
     for (;;) {
       const base = typeof init === "function" ? init() : init;
+      const cookie = this.cookies && this.cookies.size > 0 ? { Cookie: [...this.cookies].map(([name, value]) => `${name}=${value}`).join("; ") } : {};
       const request: RequestInit = {
         ...base,
-        headers: { ...this.headers, ...(base.headers as Record<string, string> | undefined) },
+        headers: { ...this.headers, ...cookie, ...(base.headers as Record<string, string> | undefined) },
         dispatcher: this.dispatcher,
         signal: AbortSignal.timeout(this.timeoutMs),
       };
@@ -174,6 +218,7 @@ export class HttpClient {
         }
         throw new HttpError(`Cannot reach ${describe(url)}: ${networkReason(error)}`, 0, url, "");
       }
+      this.keepCookies(response);
       const method = (base.method ?? "GET").toUpperCase();
       if (response.ok && expectJson && (response.headers.get("content-type") ?? "").includes("text/html")) {
         await response.body?.cancel();

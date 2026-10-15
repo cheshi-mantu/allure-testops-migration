@@ -16,6 +16,8 @@ export function newProfile(id: string, name: string, now = new Date(), source: S
           ? { options: { migrationTagPrefix: "xray" }, structure: { treeName: "Xray folders" } }
           : source === "qase"
             ? { options: { migrationTagPrefix: "qase" }, structure: { treeName: "Qase suites" } }
+            : source === "alm"
+              ? { options: { migrationTagPrefix: "alm", selfLink: false }, structure: { treeName: "ALM folders" } }
             : source === "testops"
               ? { options: { migrationTagPrefix: "old_id", selfLink: false }, structure: { createTree: false } }
               : {}),
@@ -62,7 +64,7 @@ function targetsOf(field: TestRailFieldInfo): FieldTarget["kind"][] {
     case "steps":
       return ["scenario", "ignore"];
     case "text":
-      if (field.systemName === "qase:parameters") {
+      if (field.systemName === "qase:parameters" || field.systemName === "alm:parameters") {
         return ["examples", "description", "comment", "ignore"];
       }
       if (field.systemName === "xray:preconditions") {

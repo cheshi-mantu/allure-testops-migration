@@ -138,9 +138,10 @@ function StructureEditor() {
   const xray = profile.source === "xray";
   const xml = profile.source === "xml";
   const qase = profile.source === "qase";
+  const alm = profile.source === "alm";
   /** What a node of the hierarchy is called in the source. */
-  const node = xray ? "folder" : qase ? "suite" : "section";
-  const Nodes = xray ? "Folders" : qase ? "Suites" : "Sections";
+  const node = xray || alm ? "folder" : qase ? "suite" : "section";
+  const Nodes = xray || alm ? "Folders" : qase ? "Suites" : "Sections";
   const mappedCount = structure.levels.length;
   const multiSuite = discovery.suites.length > 1;
 
@@ -170,7 +171,7 @@ function StructureEditor() {
     <Stack>
       <Group justify="space-between">
         <Text c="dimmed" maw={720}>
-          Every nesting level of {csv ? "the section path" : xml ? "the named elements around the test cases (suites, sections, folders)" : xray ? "the Xray test repository folders" : qase ? "Qase suites" : "TestRail sections"} becomes its own custom field in Allure TestOps, so you
+          Every nesting level of {csv ? "the section path" : xml ? "the named elements around the test cases (suites, sections, folders)" : xray ? "the Xray test repository folders" : qase ? "Qase suites" : alm ? "the ALM Test Plan folders (below Subject)" : "TestRail sections"} becomes its own custom field in Allure TestOps, so you
           can build a tree like <i>Epic → Feature → Story</i> instead of generic <i>Section1, Section2</i> fields.
         </Text>
         <RefreshButton />
@@ -186,7 +187,7 @@ function StructureEditor() {
             <Group gap="xs">
               {profile.source === "testrail" && <Badge variant="light">{discovery.suites.length} suite(s)</Badge>}
               <Badge variant="light">
-                {discovery.structure.reduce((sum, s) => sum + s.sectionCount, 0)} {node}s{xray ? ` in ${discovery.sampledCases} sampled test(s)` : ""}
+                {discovery.structure.reduce((sum, s) => sum + s.sectionCount, 0)} {node}s{xray || alm ? ` in ${discovery.sampledCases} sampled test(s)` : ""}
               </Badge>
               <Badge variant="light" color="grape">
                 up to {discovery.maxDepth} level(s) deep
@@ -203,6 +204,8 @@ function StructureEditor() {
                   ? "The sampled cases are not in suites, so there is nothing to map here."
                   : xray
                   ? "The sampled tests are not in folders of the test repository; nothing to map here."
+                  : alm
+                  ? "The sampled tests are right under Subject, not in folders; nothing to map here."
                   : "The selected suites have no sections; only the suite can be mapped."}
             </Alert>
           )}
@@ -254,7 +257,7 @@ function StructureEditor() {
           <Stack>
             <Group justify="space-between" align="flex-end">
               <div>
-                <Title order={4}>{xray ? "Folder levels" : qase ? "Suite levels" : "Section levels"}</Title>
+                <Title order={4}>{xray || alm ? "Folder levels" : qase ? "Suite levels" : "Section levels"}</Title>
                 <Text size="sm" c="dimmed">
                   Choose a custom field for each level. Leave a level empty to skip it.
                 </Text>
@@ -349,7 +352,7 @@ function StructureEditor() {
           <Title order={4}>Tree</Title>
           <Switch
             label="Create an Allure TestOps tree from these fields"
-            description={`The tree shows migrated cases grouped the same way as in ${csv || xml ? "the file" : xray ? "Xray" : qase ? "Qase" : "TestRail"}. An existing tree with the same name is kept as is.`}
+            description={`The tree shows migrated cases grouped the same way as in ${csv || xml ? "the file" : xray ? "Xray" : qase ? "Qase" : alm ? "the ALM Test Plan" : "TestRail"}. An existing tree with the same name is kept as is.`}
             checked={structure.createTree}
             onChange={(e) => {
               const value = e.currentTarget.checked;
@@ -399,7 +402,7 @@ function StructureEditor() {
           <Table verticalSpacing="xs">
             <Table.Thead>
               <Table.Tr>
-                <Table.Th>{csv || xml ? "Path in the file" : xray ? "Xray folder" : qase ? "Qase suites" : "TestRail"}</Table.Th>
+                <Table.Th>{csv || xml ? "Path in the file" : xray ? "Xray folder" : qase ? "Qase suites" : alm ? "ALM folders" : "TestRail"}</Table.Th>
                 <Table.Th>Allure TestOps custom fields</Table.Th>
               </Table.Tr>
             </Table.Thead>

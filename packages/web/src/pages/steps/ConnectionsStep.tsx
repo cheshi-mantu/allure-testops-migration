@@ -1,8 +1,8 @@
-import { Alert, Anchor, Autocomplete, Button, Card, Collapse, Group, NumberInput, PasswordInput, Select, SimpleGrid, Stack, Switch, Text, TextInput, Title } from "@mantine/core";
+import { Alert, Anchor, Autocomplete, Button, Card, Code, Collapse, CopyButton, Group, NumberInput, PasswordInput, ScrollArea, Select, SimpleGrid, Stack, Switch, Text, TextInput, Title } from "@mantine/core";
 import { IconAlertCircle, IconCircleCheck } from "@tabler/icons-react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
-import { QASE_RATE_LIMITS, SECRET_MASK, TESTRAIL_RATE_LIMITS, XRAY_REGIONS, type QaseConnection, type TestRailConnection, type XmlFiles } from "@atm/shared";
+import { QASE_RATE_LIMITS, SECRET_MASK, TESTRAIL_RATE_LIMITS, XRAY_REGIONS, type AlmConnection, type QaseConnection, type TestRailConnection, type XmlFiles } from "@atm/shared";
 import { api, errorText, type CheckResult } from "../../api/client";
 import { useProfile } from "../../components/ProfileContext";
 
@@ -72,6 +72,7 @@ export function ConnectionsStep() {
       <SimpleGrid cols={{ base: 1, lg: profile.source === "csv" ? 1 : 2 }} maw={profile.source === "csv" ? 640 : undefined}>
         {profile.source === "xray" && <XrayConnectionCard />}
         {profile.source === "qase" && <QaseConnectionCard />}
+        {profile.source === "alm" && <AlmConnectionCard />}
         {profile.source === "testops" && <TestOpsSourceCard />}
         {profile.source === "testrail" && (
         <Card withBorder>
@@ -448,6 +449,123 @@ function QaseConnectionCard() {
         <CheckAlert result={check.data} error={check.error} />
       </Stack>
     </Card>
+  );
+}
+
+/** ALM login: a user and password, or an API key; the session is closed after every use. */
+function AlmConnectionCard() {
+  const { profile, update, flush } = useProfile();
+  const queryClient = useQueryClient();
+  const ac = profile.alm.connection;
+  const check = useMutation({
+    mutationFn: async () => {
+      await flush();
+      return api.checkAlm(profile.id);
+    },
+    onSuccess: (result) => queryClient.setQueryData(["projects", "alm", profile.id], result.projects),
+  });
+  const set = <K extends keyof AlmConnection>(key: K, value: AlmConnection[K]) => update((p) => void (p.alm.connection[key] = value));
+  const [showDetails, setShowDetails] = useState(false);
+  const details = check.data?.details;
+
+  return (
+    <Card withBorder>
+      <Stack>
+        <Title order={4}>ALM (source)</Title>
+        <AlmNotVerified />
+        <TextInput
+          label="ALM address"
+          description="The address people open ALM at, with or without /qcbin."
+          placeholder="https://alm.example.com/qcbin"
+          value={ac.endpoint}
+          onChange={(e) => set("endpoint", e.currentTarget.value)}
+        />
+        <Select
+          label="Log in with"
+          allowDeselect={false}
+          data={[
+            { value: "password", label: "User name and password" },
+            { value: "apiKey", label: "API key (ALM 12.60 and later)" },
+          ]}
+          value={ac.auth}
+          onChange={(value) => value && set("auth", value as AlmConnection["auth"])}
+        />
+        {ac.auth === "apiKey" ? (
+          <>
+            <TextInput
+              label="Client ID"
+              description="An API key is created in ALM Site Administration (Site Users, API Keys) for a user."
+              value={ac.clientId}
+              onChange={(e) => set("clientId", e.currentTarget.value)}
+            />
+            <PasswordInput label="Secret" placeholder={secretPlaceholder(ac.secret)} value={secretValue(ac.secret)} onChange={(e) => set("secret", e.currentTarget.value)} />
+          </>
+        ) : (
+          <>
+            <TextInput label="User name" value={ac.username} onChange={(e) => set("username", e.currentTarget.value)} />
+            <PasswordInput label="Password" placeholder={secretPlaceholder(ac.password)} value={secretValue(ac.password)} onChange={(e) => set("password", e.currentTarget.value)} />
+          </>
+        )}
+        <Text size="xs" c="dimmed">
+          The user must be a member of the project and allowed to read its Test Plan; the migration only reads. The tool opens one session for a check, preview or migration and logs out as soon as it is done.
+        </Text>
+        <Switch
+          label="Skip TLS certificate verification"
+          description="For servers with self-signed certificates."
+          checked={ac.insecureTls}
+          onChange={(e) => set("insecureTls", e.currentTarget.checked)}
+        />
+        <Switch
+          label="Detailed log"
+          description="Every request to ALM with its answer status and time, the structure of the answers (field names and kinds of values, file names, not the text of tests) and what was read for each test go to the log of the connection check and of every run. Passwords, secrets and cookies are never written."
+          checked={profile.alm.detailedLog}
+          onChange={(e) => {
+            const checked = e.currentTarget.checked;
+            update((p) => void (p.alm.detailedLog = checked));
+          }}
+        />
+        <Group>
+          <Button variant="light" loading={check.isPending} onClick={() => check.mutate()}>
+            Test connection
+          </Button>
+        </Group>
+        <CheckAlert result={check.data} error={check.error} />
+        {details && (
+          <Stack gap="xs">
+            <Group gap="xs">
+              <Anchor component="button" type="button" size="sm" onClick={() => setShowDetails((v) => !v)}>
+                {showDetails ? "Hide" : "Show"} the detailed log of this check
+              </Anchor>
+              <CopyButton value={details}>
+                {({ copied, copy }) => (
+                  <Button size="compact-xs" variant="default" onClick={copy}>
+                    {copied ? "Copied" : "Copy"}
+                  </Button>
+                )}
+              </CopyButton>
+            </Group>
+            <Collapse expanded={showDetails}>
+              <ScrollArea.Autosize mah={260} type="auto">
+                <Code block fz="xs">
+                  {details}
+                </Code>
+              </ScrollArea.Autosize>
+            </Collapse>
+          </Stack>
+        )}
+      </Stack>
+    </Card>
+  );
+}
+
+/** The ALM migration is built from the public REST API reference and a simulated ALM only. */
+export function AlmNotVerified() {
+  return (
+    <Alert color="yellow" title="Not yet verified on a real ALM server">
+      The ALM migration is built from the public ALM REST API reference and tested against a simulated ALM only. Check the connection, look at a few tests on the Preview step and do a dry run before the
+      migration. If something fails or looks wrong, keep <i>Detailed log</i> on, download the log of the run (Run step, <i>Download log</i>) or copy the log of the connection check, and send it with a
+      description of the problem: it holds no passwords or secrets, and no text of the tests.
+    </Alert>
   );
 }
 

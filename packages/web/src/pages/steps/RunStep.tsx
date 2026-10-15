@@ -25,6 +25,7 @@ import { api, errorText } from "../../api/client";
 import { useProfile } from "../../components/ProfileContext";
 import { FixButton, ProblemList } from "../../components/Problems";
 import { RunStatusBadge } from "../../components/RunStatusBadge";
+import { AlmNotVerified } from "./ConnectionsStep";
 
 /** How the run's file, project or tag prefix differ from the profile now; empty when they match or are unknown. */
 function otherSettings(run: RunSummary, profile: Profile, currentFileName: string | null): string[] {
@@ -43,6 +44,9 @@ function otherSettings(run: RunSummary, profile: Profile, currentFileName: strin
         }
         if (profile.source === "qase") {
           return `${context.sourceLabel}, the profile now uses Qase project ${profile.qase.scope.projectCode || "?"}.`;
+        }
+        if (profile.source === "alm") {
+          return `${context.sourceLabel}, the profile now uses ALM project ${profile.alm.scope.domain || "?"} / ${profile.alm.scope.project || "?"}.`;
         }
         if (profile.source === "xray") {
           const jql = profile.xray.scope.jql.trim();
@@ -108,6 +112,19 @@ function problems(profile: Profile): string[] {
     const names = profile.fields.filter((m) => m.target.kind === "name").length;
     if (names !== 1) {
       list.push("Map exactly one field to the test case name (Fields).");
+    }
+    return list;
+  }
+  if (profile.source === "alm") {
+    const connection = profile.alm.connection;
+    if (!connection.endpoint || !(connection.auth === "apiKey" ? connection.clientId && has(connection.secret) : connection.username && has(connection.password))) {
+      list.push("The ALM connection is incomplete (Connections).");
+    }
+    if (!profile.alm.scope.project || !profile.testops.scope.projectId) {
+      list.push("Choose both projects (Projects).");
+    }
+    if (profile.fields.length === 0) {
+      list.push("Review the field mapping (Fields).");
     }
     return list;
   }
@@ -268,6 +285,10 @@ export function RunStep() {
 
   return (
     <Stack>
+      {profile.source === "alm" && <AlmNotVerified />}
+      {profile.source === "alm" && !profile.alm.detailedLog && (
+        <Alert color="blue">The detailed log is off (Connections). Turn it on before a run whose log you are going to send.</Alert>
+      )}
       {blockers.length > 0 && (
         <Alert color="red" title="Not ready yet">
           <List size="sm">
@@ -435,7 +456,7 @@ export function RunStep() {
             {profile.source === "testops"
               ? `the target projects ${profile.testopsSource.projects.map((p) => `"${p.targetName}"`).join(", ")}; projects that do not exist yet are created.`
               : `Allure TestOps project #${profile.testops.scope.projectId}.`}{" "}
-            {profile.source === "testrail" ? "TestRail is only read." : profile.source === "xray" ? "Jira and Xray are only read." : profile.source === "qase" ? "Qase is only read." : profile.source === "testops" ? "The source Allure TestOps is only read." : "The file is not changed."}
+            {profile.source === "testrail" ? "TestRail is only read." : profile.source === "xray" ? "Jira and Xray are only read." : profile.source === "qase" ? "Qase is only read." : profile.source === "alm" ? "ALM is only read." : profile.source === "testops" ? "The source Allure TestOps is only read." : "The file is not changed."}
           </Text>
           <Group justify="flex-end">
             <Button variant="default" onClick={() => setConfirm(false)}>
@@ -451,15 +472,18 @@ export function RunStep() {
   );
 }
 
-type LogFilter = "all" | "problems" | "errors";
+type LogFilter = "main" | "all" | "problems" | "errors";
 
 function RunDetails({ profile, run, other }: { profile: Profile; run: RunSummary; other: string[] }) {
   const { entries, summary: live } = useRunStream(profile.id, run);
   const summary = live ?? run;
-  const [filter, setFilter] = useState<LogFilter>("all");
+  const [filter, setFilter] = useState<LogFilter>("main");
   const viewport = useRef<HTMLDivElement>(null);
   const shown = useMemo(
-    () => entries.filter((e) => filter === "all" || (filter === "errors" ? e.level === "error" : e.level === "warn" || e.level === "error")),
+    () =>
+      entries.filter((e) =>
+        filter === "all" ? true : filter === "main" ? e.level !== "debug" : filter === "errors" ? e.level === "error" : e.level === "warn" || e.level === "error",
+      ),
     [entries, filter],
   );
   const counters = summary.counters;
@@ -570,7 +594,8 @@ function RunDetails({ profile, run, other }: { profile: Profile; run: RunSummary
             value={filter}
             onChange={(value) => setFilter(value as LogFilter)}
             data={[
-              { value: "all", label: `All (${entries.length})` },
+              { value: "main", label: `All (${entries.filter((e) => e.level !== "debug").length})` },
+              ...(entries.some((e) => e.level === "debug") ? [{ value: "all", label: `With details (${entries.length})` }] : []),
               { value: "problems", label: `Warnings & errors (${entries.filter((e) => e.level === "warn" || e.level === "error").length})` },
               { value: "errors", label: `Errors (${entries.filter((e) => e.level === "error").length})` },
             ]}

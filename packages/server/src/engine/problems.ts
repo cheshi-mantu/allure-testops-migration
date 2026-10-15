@@ -137,13 +137,14 @@ export interface ExplainContext {
   service: Service;
 }
 
-export type Service = "Allure TestOps" | "TestRail" | "Jira" | "Xray" | "Qase";
+export type Service = "Allure TestOps" | "TestRail" | "Jira" | "Xray" | "Qase" | "ALM";
 
 const CREDENTIAL_HINTS: Record<Service, string> = {
   TestRail: "The user email or API key is wrong, or the API key was deleted. Create a new API key in TestRail (My Settings, API Keys) and enter it on the Connections step.",
   "Allure TestOps": "The API token is wrong, expired or was revoked. Create a new token in Allure TestOps (your profile, API tokens) and enter it on the Connections step.",
   Jira: "The email or API token is wrong, or the token was revoked. Create an API token for the Atlassian account (id.atlassian.com, Security, API tokens) and enter it on the Connections step.",
   Qase: "The API token is wrong or was revoked. Create a new token in Qase (your profile, API tokens) and enter it on the Connections step.",
+  ALM: "The user name and password, or the client id and secret of the API key, are wrong, or the user is not allowed into ALM. Check them by logging in to ALM, then enter them on the Connections step.",
   Xray: "The Xray API key (client id and secret) is wrong or was revoked, or the region does not match the Jira site. Create an API key in Jira (Apps, Xray, API Keys) and enter it on the Connections step.",
 };
 
@@ -198,6 +199,8 @@ export function explain(error: unknown, operation: Operation, context: ExplainCo
       hint:
         service === "TestRail"
           ? "Check that the TestRail API is enabled (Administration, Site Settings, API) and that the user can read the project."
+          : service === "ALM"
+            ? "The ALM user must be a member of the project and allowed to read the Test Plan. Ask an ALM project administrator, or use another user."
           : service === "Qase"
             ? "The role of the Qase user who owns the API token must be able to read the project, its test cases and shared steps. Ask a Qase administrator, or use the token of another user."
             : service === "Jira" || service === "Xray"
@@ -330,6 +333,9 @@ export function serviceOf(error: unknown, profile: Profile): Service {
     }
     if (profile.source === "qase" && !startsWith(profile.testops.connection.endpoint)) {
       return "Qase";
+    }
+    if (profile.source === "alm" && !startsWith(profile.testops.connection.endpoint)) {
+      return "ALM";
     }
     if (profile.source === "xray" && !startsWith(profile.testops.connection.endpoint)) {
       if (/getxray\.app|\/api\/v\d+\/(?:graphql|authenticate|attachments?)/.test(cause.url)) {

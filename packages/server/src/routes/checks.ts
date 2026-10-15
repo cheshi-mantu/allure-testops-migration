@@ -2,6 +2,7 @@ import type { ConnectionCheck, NamedId, Profile } from "@atm/shared";
 import { HttpError } from "../http/httpClient.js";
 import { TestOpsClient } from "../testops/client.js";
 import { TestRailClient } from "../testrail/client.js";
+import { AlmClient } from "../alm/client.js";
 import { QaseClient } from "../qase/client.js";
 import { JiraClient, XrayClient } from "../xray/client.js";
 
@@ -43,6 +44,43 @@ export async function checkTestRail(profile: Profile): Promise<CheckResult> {
     };
   } catch (error) {
     return { ok: false, message: explain(error, "TestRail"), projects: [] };
+  }
+}
+
+/** ALM login; returns the projects the user can open, with their domains as keys. */
+export async function checkAlm(profile: Profile): Promise<CheckResult> {
+  const connection = profile.alm.connection;
+  const credentials = connection.auth === "apiKey" ? connection.clientId && connection.secret : connection.username && connection.password;
+  if (!connection.endpoint.trim() || !credentials) {
+    return { ok: false, message: connection.auth === "apiKey" ? "Enter the ALM address, the client id and the secret." : "Enter the ALM address, the user name and the password.", projects: [] };
+  }
+  // Every step of the check, for the detailed log the user can copy and send.
+  const lines: string[] = [];
+  const started = Date.now();
+  const trace = (message: string) => lines.push(`+${((Date.now() - started) / 1000).toFixed(2)}s ${message}`);
+  const client = new AlmClient(connection, { trace });
+  const details = () => (profile.alm.detailedLog ? lines.join("\n") : undefined);
+  const failed = (message: string): CheckResult => ({ ok: false, message, projects: [], ...(details() ? { details: details() } : {}) });
+  try {
+    const domains = await client.domains();
+    const projects = domains.flatMap((domain) => domain.projects.map((project) => ({ key: domain.name, name: project })));
+    trace(`Domains and projects: ${domains.map((domain) => `${domain.name} (${domain.projects.length})`).join(", ") || "none"}.`);
+    await client.logout();
+    return {
+      ok: true,
+      message: `Connected to ALM. ${projects.length} project(s) in ${domains.length} domain(s) available.`,
+      projects: projects.map((project, index) => ({ id: index + 1, ...project })),
+      ...(details() ? { details: details() } : {}),
+    };
+  } catch (error) {
+    await client.logout();
+    if (error instanceof HttpError && error.status === 404) {
+      return failed("ALM was not found at this address. Enter the address people open ALM at, e.g. https://alm.example.com/qcbin.");
+    }
+    if (error instanceof HttpError && error.status === 401 && connection.auth === "apiKey" && /oauth2/.test(error.url)) {
+      return failed("ALM rejected the API key. Check the client id and secret; API keys need ALM 12.60 or later.");
+    }
+    return failed(explain(error, "ALM"));
   }
 }
 

@@ -239,6 +239,8 @@ export class Run {
             ? "Connecting to Jira and Xray"
             : profile.source === "qase"
               ? "Connecting to Qase"
+              : profile.source === "alm"
+                ? "Connecting to ALM"
               : profile.source === "testops"
                 ? "Connecting to both Allure TestOps instances"
                 : "Connecting to TestRail",
@@ -261,8 +263,7 @@ export class Run {
         `Qase rate limit: ${QASE_RATE_LIMITS[profile.qase.connection.rateLimit]} requests per minute for the whole workspace on this plan. The tool sends at most ${qaseRequestsPerWindow(profile.qase.connection)} every ${QASE_WINDOW_MS / 1000} seconds, and waits as long as Qase asks when it still answers "too many requests".`,
       );
     }
-    const retryLog = (service: string) => (info: RetryInfo) =>
-      this.log("warn", `${service}: ${info.url} failed (${info.reason}); retry ${info.attempt} of ${info.of} in ${Math.max(1, Math.round(info.delayMs / 1000))}s.`);
+    const retryLog = (service: string) => this.retryLog(service);
     if (profile.source === "testops") {
       await this.workTestOps(retryLog);
       return;
@@ -406,17 +407,30 @@ export class Run {
     }
   }
 
+  private retryLog(service: string): (info: RetryInfo) => void {
+    return (info) => this.log("warn", `${service}: ${info.url} failed (${info.reason}); retry ${info.attempt} of ${info.of} in ${Math.max(1, Math.round(info.delayMs / 1000))}s.`);
+  }
+
   /** Reads the cases of the source and migrates them into one target project, or checks them on a dry run. */
   private async runProject(retryLog: (service: string) => (info: RetryInfo) => void, targetMissing = false) {
     const profile = this.profile;
-    const log = (level: "info" | "warn", message: string, caseId?: string) => this.log(level, message, caseId);
+    const log = (level: "debug" | "info" | "warn", message: string, caseId?: string) => this.log(level, message, caseId);
     const source = await prepareSource(
       profile,
       this.deps,
       log,
-      retryLog(profile.source === "xray" ? "Jira or Xray" : profile.source === "qase" ? "Qase" : profile.source === "testops" ? "Source Allure TestOps" : "TestRail"),
+      retryLog(profile.source === "xray" ? "Jira or Xray" : profile.source === "qase" ? "Qase" : profile.source === "alm" ? "ALM" : profile.source === "testops" ? "Source Allure TestOps" : "TestRail"),
     );
+    try {
+      await this.runSource(source, targetMissing);
+    } finally {
+      await source.close?.();
+    }
+  }
 
+  private async runSource(source: PreparedSource, targetMissing: boolean) {
+    const profile = this.profile;
+    const log = (level: "debug" | "info" | "warn", message: string, caseId?: string) => this.log(level, message, caseId);
     if (targetMissing) {
       // A dry run for a project that is created on the migration: the cases are converted, the target is not checked.
       this.phase(`Reading test cases from ${source.name}`);
@@ -429,7 +443,7 @@ export class Run {
 
     this.phase("Connecting to Allure TestOps");
     const projectId = requireTestOpsProject(profile);
-    const testops = new TestOpsClient(profile.testops.connection, undefined, retryLog("Allure TestOps"));
+    const testops = new TestOpsClient(profile.testops.connection, undefined, this.retryLog("Allure TestOps"));
     const project = await testops.project(projectId);
     this.log("info", `Target project: ${project.name} (#${project.id}).`);
     const targets = new TargetResolver(testops, projectId, (level, message) => this.log(level, message), this.workflowCloner ?? undefined);
@@ -818,6 +832,8 @@ function sourceLabelOf(profile: Profile): string {
       return "XML file";
     case "qase":
       return `Qase project ${profile.qase.scope.projectCode || "?"}`;
+    case "alm":
+      return `ALM project ${profile.alm.scope.domain || "?"} / ${profile.alm.scope.project || "?"}`;
     case "testops":
       return `Allure TestOps ${profile.testopsSource.connection.endpoint.replace(/^https?:\/\//, "").replace(/\/+$/, "") || "?"}: ${profile.testopsSource.projects.map((p) => p.sourceName).join(", ") || "no projects"}`;
     case "xray": {
