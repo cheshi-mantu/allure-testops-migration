@@ -11,7 +11,8 @@ import { ZapiClient, type SquadTrace } from "./client.js";
 import type { SquadContext } from "./transform.js";
 import type { SquadCase } from "./types.js";
 
-const SAMPLE_SIZE = 300;
+/** Tests whose steps the mapping screens look at; each takes a request. */
+const SAMPLE_SIZE = 100;
 const JIRA_PAGE = 100;
 /** Tests whose steps are read at the same time. */
 const PARALLEL = 4;
@@ -98,9 +99,9 @@ export async function loadSquadContext(profile: Profile, onRetry?: (info: RetryI
 }
 
 /** Steps of these Jira issues, and the files of steps when the step list does not name them. */
-export async function withSteps(context: SquadProjectContext, issues: JiraIssue[]): Promise<SquadCase[]> {
+export async function withSteps(context: SquadProjectContext, issues: JiraIssue[], files = true): Promise<SquadCase[]> {
   const cases: SquadCase[] = issues.map((issue) => ({ issue, steps: [], stepAttachments: new Map() }));
-  const stepFiles = context.profile.squad.scope.stepFiles;
+  const stepFiles = files && context.profile.squad.scope.stepFiles;
   await inParallel(cases, async (testCase) => {
     testCase.steps = await context.zapi.steps(testCase.issue.id, context.project.id);
     for (const step of testCase.steps) {
@@ -119,8 +120,8 @@ export async function withSteps(context: SquadProjectContext, issues: JiraIssue[
   return cases;
 }
 
-/** Tests of the scope, page by page. */
-export async function* readSquadCases(context: SquadProjectContext, profile: Profile, limit?: number): AsyncGenerator<SquadCase[]> {
+/** Tests of the scope, page by page; `files: false` skips looking up the files of steps, a request per step. */
+export async function* readSquadCases(context: SquadProjectContext, profile: Profile, limit?: number, files = true): AsyncGenerator<SquadCase[]> {
   const scope = profile.squad.scope;
   const keys = scope.issueKeys.map((key) => key.trim().toUpperCase()).filter(Boolean);
   const jql = scopeJql(context.project.key, context.issueType, scope.jql, keys);
@@ -130,7 +131,7 @@ export async function* readSquadCases(context: SquadProjectContext, profile: Pro
       context.trace(`Jira search ${jql}: first issue ${shapeOf({ fields: Object.fromEntries(Object.entries(issues[0]?.fields ?? {}).filter(([, value]) => value !== null)) })}.`);
       first = false;
     }
-    yield await withSteps(context, issues);
+    yield await withSteps(context, issues, files);
   }
 }
 
@@ -146,7 +147,7 @@ export async function readSquadCase(context: SquadProjectContext, key: string): 
 export async function discoverSquad(profile: Profile): Promise<SourceDiscovery> {
   const first = await loadSquadContext(profile);
   const sample: SquadCase[] = [];
-  for await (const page of readSquadCases(first, profile, SAMPLE_SIZE)) {
+  for await (const page of readSquadCases(first, profile, SAMPLE_SIZE, false)) {
     sample.push(...page);
   }
   // The catalog lists the issue link directions found in the sample.

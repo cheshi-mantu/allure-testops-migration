@@ -10,7 +10,8 @@ import { isAccountId } from "./diagnostics.js";
 import { zephyrSteps, type ZephyrContext } from "./transform.js";
 import type { ZephyrCase, ZephyrFolder, ZephyrOption, ZephyrProject, ZephyrTestCase, ZephyrTestStep } from "./types.js";
 
-const SAMPLE_SIZE = 300;
+/** Test cases whose steps and scripts the mapping screens look at; each takes a request or two. */
+const SAMPLE_SIZE = 100;
 const EXAMPLE_PATHS = 5;
 /** Test cases read at the same time; each needs a few requests. */
 const PARALLEL = 4;
@@ -118,9 +119,9 @@ async function resolveJira(context: Pick<ZephyrProjectContext, "jira" | "catalog
 }
 
 /** Steps or script, files and step files of these test cases. */
-export async function withDetails(context: ZephyrProjectContext, testCases: ZephyrTestCase[]): Promise<ZephyrCase[]> {
+export async function withDetails(context: ZephyrProjectContext, testCases: ZephyrTestCase[], files = true): Promise<ZephyrCase[]> {
   const { client } = context;
-  const stepFiles = context.profile.zephyr.scope.stepFiles;
+  const stepFiles = files && context.profile.zephyr.scope.stepFiles;
   const result: ZephyrCase[] = testCases.map((testCase) => ({ testCase, steps: [], script: null, attachments: [], stepAttachments: new Map() }));
   await inParallel(result, async (item) => {
     const key = item.testCase.key;
@@ -138,7 +139,9 @@ export async function withDetails(context: ZephyrProjectContext, testCases: Zeph
         item.script = error.status === 422 ? await client.testScript(key) : null;
       }
     }
-    item.attachments = await client.attachments(key);
+    if (files) {
+      item.attachments = await client.attachments(key);
+    }
     if (stepFiles) {
       for (const step of item.steps) {
         if (step.inline && step.id !== null && step.id !== undefined) {
@@ -299,7 +302,8 @@ export function parseTestCaseKey(raw: string): string | null {
 }
 
 /** Test cases of the scope with their details, page by page. */
-export async function* readZephyrCases(context: ZephyrProjectContext, profile: Profile, limit = Infinity): AsyncGenerator<ZephyrCase[]> {
+/** `files: false` skips the files of test cases and steps, which the mapping screens do not need: a request per step. */
+export async function* readZephyrCases(context: ZephyrProjectContext, profile: Profile, limit = Infinity, files = true): AsyncGenerator<ZephyrCase[]> {
   const key = context.project.key;
   const keys = profile.zephyr.scope.testCaseKeys.map(parseTestCaseKey).filter((value): value is string => value !== null);
   if (keys.length > 0) {
@@ -312,7 +316,7 @@ export async function* readZephyrCases(context: ZephyrProjectContext, profile: P
       }
     }
     if (found.length > 0) {
-      yield await withDetails(context, found);
+      yield await withDetails(context, found, files);
     }
     return;
   }
@@ -326,7 +330,7 @@ export async function* readZephyrCases(context: ZephyrProjectContext, profile: P
       wanted.forEach((testCase) => seen.add(testCase.key));
       count += wanted.length;
       if (wanted.length > 0) {
-        yield await withDetails(context, wanted);
+        yield await withDetails(context, wanted, files);
       }
       if (count >= limit) {
         return;
@@ -356,7 +360,7 @@ export function folderChoices(folders: ZephyrFolder[]): { id: number; name: stri
 export async function discoverZephyr(profile: Profile): Promise<SourceDiscovery> {
   const first = await loadZephyrContext(profile);
   const sample: ZephyrCase[] = [];
-  for await (const page of readZephyrCases(first, profile, SAMPLE_SIZE)) {
+  for await (const page of readZephyrCases(first, profile, SAMPLE_SIZE, false)) {
     sample.push(...page);
   }
   // Kinds of custom fields and the types of issue links come from the whole sample.

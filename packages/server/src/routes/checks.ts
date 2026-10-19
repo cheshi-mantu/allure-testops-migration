@@ -1,4 +1,4 @@
-import type { ConnectionCheck, NamedId, Profile } from "@atm/shared";
+import { ZEPHYR_REGIONS, type ConnectionCheck, type NamedId, type Profile } from "@atm/shared";
 import { HttpError } from "../http/httpClient.js";
 import { TestOpsClient } from "../testops/client.js";
 import { TestRailClient } from "../testrail/client.js";
@@ -214,9 +214,11 @@ export async function checkZephyr(profile: Profile): Promise<CheckResult> {
     if (error instanceof HttpError && error.status === 401) {
       const address = await zephyrAddressOfToken(connection.apiToken, connection.endpoint);
       trace(`Other Zephyr addresses: ${address ? `${address} accepts the token` : "none accepts the token"}.`);
-      hint = address
-        ? `Zephyr at ${connection.endpoint} rejected the API access token, and ${address} accepts it: choose this address in the Zephyr API field and check again.`
-        : "Zephyr rejected the API access token at every known Zephyr address. Check that the whole token was copied, that it was not revoked, and that it was created in this Jira site (profile menu, Zephyr API Access Tokens) after the Zephyr app was installed.";
+      if (address) {
+        const label = ZEPHYR_REGIONS.find((region) => region.value === address)?.label ?? address;
+        return { ...result(false, `Jira works (as ${user}), but Zephyr at ${connection.endpoint} rejected the API access token. The token belongs to ${label}: use this address and check again.`), suggestedEndpoint: address };
+      }
+      hint = "Zephyr rejected the API access token at every known Zephyr address. Check that the whole token was copied, that it was not revoked, and that it was created in this Jira site (profile menu, Zephyr API Access Tokens) after the Zephyr app was installed.";
     }
     return result(false, `Jira works (as ${user}), but ${hint}`);
   }

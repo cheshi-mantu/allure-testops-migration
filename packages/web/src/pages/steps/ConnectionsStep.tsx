@@ -599,6 +599,8 @@ function ZephyrConnectionCard() {
     onSuccess: (result) => queryClient.setQueryData(["projects", "zephyr", profile.id], result.projects),
   });
   const set = <K extends keyof typeof zc>(key: K, value: (typeof zc)[K]) => update((p) => void (p.zephyr.connection[key] = value));
+  // Shown until the address is changed: the check found the address the token belongs to.
+  const suggested = check.data?.suggestedEndpoint && check.data.suggestedEndpoint !== zc.endpoint.replace(/\/+$/, "") ? check.data.suggestedEndpoint : null;
 
   return (
     <Card withBorder>
@@ -665,6 +667,19 @@ function ZephyrConnectionCard() {
           </Button>
         </Group>
         <CheckAlert result={check.data} error={check.error} />
+        {suggested && (
+          <Group>
+            <Button
+              loading={check.isPending}
+              onClick={() => {
+                set("endpoint", suggested);
+                check.mutate();
+              }}
+            >
+              Use {ZEPHYR_REGIONS.find((r) => r.value === suggested)?.label ?? suggested} and test again
+            </Button>
+          </Group>
+        )}
         {check.data?.details && <CheckDetails details={check.data.details} />}
       </Stack>
     </Card>

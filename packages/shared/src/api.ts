@@ -12,6 +12,8 @@ export interface ConnectionCheck {
   message: string;
   /** Server version or user name when the service reports it. */
   details?: string;
+  /** Another API address of the same service that accepts the credentials, when the entered one does not. */
+  suggestedEndpoint?: string;
 }
 
 // ---------------------------------------------------------------- TestRail discovery
