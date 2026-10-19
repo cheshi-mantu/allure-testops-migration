@@ -7,12 +7,12 @@ import { ApiError, errorText } from "../api/client";
 import { useProfile } from "./ProfileContext";
 
 const STEP_LABELS: Record<FixLink["step"], Record<Profile["source"], string>> = {
-  connections: { testrail: "Connections", csv: "Connection", xray: "Connections", xml: "Connection", qase: "Connections", alm: "Connections", testops: "Connections" },
-  file: { testrail: "CSV file", csv: "CSV file", xray: "CSV file", xml: "XML file", qase: "CSV file", alm: "CSV file", testops: "CSV file" },
-  scope: { testrail: "Projects", csv: "Project", xray: "Projects", xml: "Project", qase: "Projects", alm: "Projects", testops: "Projects" },
-  structure: { testrail: "Suites & sections", csv: "Sections", xray: "Folders", xml: "Sections", qase: "Suites", alm: "Folders", testops: "Projects" },
-  fields: { testrail: "Fields", csv: "Columns", xray: "Fields", xml: "Fields", qase: "Fields", alm: "Fields", testops: "Projects" },
-  options: { testrail: "Options", csv: "Options", xray: "Options", xml: "Options", qase: "Options", alm: "Options", testops: "Options" },
+  connections: { testrail: "Connections", csv: "Connection", xray: "Connections", zephyr: "Connections", squad: "Connections", xml: "Connection", qase: "Connections", alm: "Connections", testops: "Connections" },
+  file: { testrail: "CSV file", csv: "CSV file", xray: "CSV file", zephyr: "CSV file", squad: "CSV file", xml: "XML file", qase: "CSV file", alm: "CSV file", testops: "CSV file" },
+  scope: { testrail: "Projects", csv: "Project", xray: "Projects", zephyr: "Projects", squad: "Projects", xml: "Project", qase: "Projects", alm: "Projects", testops: "Projects" },
+  structure: { testrail: "Suites & sections", csv: "Sections", xray: "Folders", zephyr: "Folders", squad: "Projects", xml: "Sections", qase: "Suites", alm: "Folders", testops: "Projects" },
+  fields: { testrail: "Fields", csv: "Columns", xray: "Fields", zephyr: "Fields", squad: "Fields", xml: "Fields", qase: "Fields", alm: "Fields", testops: "Projects" },
+  options: { testrail: "Options", csv: "Options", xray: "Options", zephyr: "Options", squad: "Options", xml: "Options", qase: "Options", alm: "Options", testops: "Options" },
 };
 
 /** "Fields: Priority": the step and, when known, the field label instead of its system name. */

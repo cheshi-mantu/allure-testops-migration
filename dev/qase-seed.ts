@@ -19,7 +19,7 @@
 import { HttpError } from "../packages/server/src/http/httpClient.js";
 import { QaseClient } from "../packages/server/src/qase/client.js";
 import type { QaseCase, QaseCustomField, QaseMilestone, QaseSharedStep, QaseSuite } from "../packages/server/src/qase/types.js";
-import { wikiToMarkdown } from "../packages/server/src/xray/wiki.js";
+import { wikiToMarkdown } from "../packages/server/src/jira/wiki.js";
 import { folderPaths, generate, random, SCENARIOS, VERSIONS, type GeneratedTest, type StepTemplate } from "./xray-seed-scenarios.js";
 
 /** In the description of every seeded suite: what cleanup looks for. */

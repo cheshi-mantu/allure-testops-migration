@@ -67,6 +67,8 @@ export function ScopeStep() {
     <Stack>
       <SimpleGrid cols={{ base: 1, lg: isFileSource(profile.source) ? 1 : 2 }} maw={isFileSource(profile.source) ? 640 : undefined}>
         {profile.source === "xray" && <XrayScopeCard onChange={invalidateDiscovery} />}
+        {profile.source === "zephyr" && <ZephyrScopeCard onChange={invalidateDiscovery} />}
+        {profile.source === "squad" && <SquadScopeCard onChange={invalidateDiscovery} />}
         {profile.source === "qase" && <QaseScopeCard onChange={invalidateDiscovery} />}
         {profile.source === "alm" && <AlmScopeCard onChange={invalidateDiscovery} />}
         {profile.source === "testrail" && (
@@ -523,6 +525,196 @@ function AlmScopeCard({ onChange }: { onChange: () => void }) {
           onChange={(values) => {
             const ids = values.map((value) => Number(/(\d+)\s*$/.exec(value)?.[1])).filter((id) => Number.isInteger(id) && id > 0);
             update((p) => void (p.alm.scope.testIds = [...new Set(ids)]));
+            onChange();
+          }}
+        />
+      </Stack>
+    </Card>
+  );
+}
+
+/** Jira project of the test cases, optionally some folders, and an optional list of test cases for a trial run. */
+function ZephyrScopeCard({ onChange }: { onChange: () => void }) {
+  const { profile, update, flush } = useProfile();
+  const scope = profile.zephyr.scope;
+  const projects = useQuery({
+    queryKey: ["projects", "zephyr", profile.id],
+    queryFn: async () => {
+      await flush();
+      const result = await api.checkZephyr(profile.id);
+      if (!result.ok) {
+        throw new Error(result.message);
+      }
+      return result.projects;
+    },
+  });
+  const folders = useQuery({
+    queryKey: ["folders", "zephyr", profile.id, scope.projectKey],
+    queryFn: async () => {
+      await flush();
+      return api.zephyrFolders(profile.id);
+    },
+    enabled: Boolean(scope.projectKey),
+  });
+  useEffect(() => {
+    const only = projects.data?.length === 1 ? projects.data[0]! : null;
+    if (only?.key && !scope.projectKey) {
+      update((p) => void (p.zephyr.scope.projectKey = only.key!));
+    }
+  }, [projects.data, scope.projectKey, update]);
+
+  return (
+    <Card withBorder>
+      <Stack>
+        <Title order={4}>From Zephyr</Title>
+        {projects.error && <Alert color="red">{errorText(projects.error)}</Alert>}
+        <Select
+          label="Jira project"
+          description="Projects Zephyr is turned on for."
+          placeholder={projects.isLoading ? "Loading…" : "Choose a project"}
+          rightSection={projects.isLoading ? <Loader size={14} /> : undefined}
+          searchable
+          data={[
+            ...(projects.data ?? []).filter((p) => p.key).map((p) => ({ value: p.key!, label: p.name })),
+            ...(scope.projectKey && !projects.data?.some((p) => p.key === scope.projectKey) ? [{ value: scope.projectKey, label: scope.projectKey }] : []),
+          ]}
+          value={scope.projectKey || null}
+          onChange={(value) => {
+            update((p) => {
+              p.zephyr.scope.projectKey = value ?? "";
+              p.zephyr.scope.folderIds = [];
+              p.zephyr.scope.testCaseKeys = [];
+            });
+            onChange();
+          }}
+        />
+        {folders.error && <Alert color="red">{errorText(folders.error)}</Alert>}
+        <MultiSelect
+          label="Folders (optional)"
+          description="Only the test cases of these folders and of the folders inside them. Leave empty for the whole project."
+          placeholder={folders.isLoading ? "Loading…" : scope.folderIds.length ? undefined : "All folders"}
+          searchable
+          clearable
+          disabled={!scope.projectKey}
+          data={(folders.data ?? []).map((folder) => ({ value: String(folder.id), label: folder.name }))}
+          value={scope.folderIds.map(String)}
+          onChange={(values) => {
+            update((p) => void (p.zephyr.scope.folderIds = values.map(Number)));
+            onChange();
+          }}
+        />
+        <TagsInput
+          label="Only these test cases (optional)"
+          description={`Test case keys such as ${scope.projectKey || "CALC"}-T12, useful for a trial migration. Leave empty for everything.`}
+          placeholder="Type a key and press Enter"
+          value={scope.testCaseKeys}
+          onChange={(values) => {
+            update((p) => void (p.zephyr.scope.testCaseKeys = [...new Set(values.map((v) => v.trim().toUpperCase()).filter(Boolean))]));
+            onChange();
+          }}
+        />
+        <Checkbox
+          label="Read files of steps"
+          description="Zephyr lists the files of each step separately: one more request per step. Turn it off when steps have no files, to make reading faster."
+          checked={scope.stepFiles}
+          onChange={(e) => {
+            const checked = e.currentTarget.checked;
+            update((p) => void (p.zephyr.scope.stepFiles = checked));
+            onChange();
+          }}
+        />
+      </Stack>
+    </Card>
+  );
+}
+
+/** Jira project and issue type of the tests, an optional JQL filter and an optional list of tests for a trial run. */
+function SquadScopeCard({ onChange }: { onChange: () => void }) {
+  const { profile, update, flush } = useProfile();
+  const scope = profile.squad.scope;
+  const projects = useQuery({
+    queryKey: ["projects", "squad", profile.id],
+    queryFn: async () => {
+      await flush();
+      const result = await api.checkSquad(profile.id);
+      if (!result.ok) {
+        throw new Error(result.message);
+      }
+      return result.projects;
+    },
+  });
+  useEffect(() => {
+    const only = projects.data?.length === 1 ? projects.data[0]! : null;
+    if (only?.key && !scope.projectKey) {
+      update((p) => void (p.squad.scope.projectKey = only.key!));
+    }
+  }, [projects.data, scope.projectKey, update]);
+  const [jql, setJql] = useState(scope.jql);
+  const [issueType, setIssueType] = useState(scope.issueType);
+
+  return (
+    <Card withBorder>
+      <Stack>
+        <Title order={4}>From Zephyr Squad</Title>
+        {projects.error && <Alert color="red">{errorText(projects.error)}</Alert>}
+        <Select
+          label="Jira project"
+          placeholder={projects.isLoading ? "Loading…" : "Choose a project"}
+          rightSection={projects.isLoading ? <Loader size={14} /> : undefined}
+          searchable
+          data={[
+            ...(projects.data ?? []).filter((p) => p.key).map((p) => ({ value: p.key!, label: p.name })),
+            ...(scope.projectKey && !projects.data?.some((p) => p.key === scope.projectKey) ? [{ value: scope.projectKey, label: scope.projectKey }] : []),
+          ]}
+          value={scope.projectKey || null}
+          onChange={(value) => {
+            update((p) => void (p.squad.scope.projectKey = value ?? ""));
+            onChange();
+          }}
+        />
+        <TextInput
+          label="Issue type of the tests"
+          description="Zephyr Squad uses the issue type Test unless your Jira administrator changed it."
+          value={issueType}
+          onChange={(e) => setIssueType(e.currentTarget.value)}
+          onBlur={() => {
+            if (issueType.trim() !== scope.issueType) {
+              update((p) => void (p.squad.scope.issueType = issueType.trim() || "Test"));
+              onChange();
+            }
+          }}
+        />
+        <TextInput
+          label="JQL filter (optional)"
+          description={
+            <>
+              Narrows the tests of the project, e.g. <Code>labels = regression</Code> or <Code>component = Checkout</Code>. Leave empty for all tests.
+            </>
+          }
+          placeholder="labels = regression"
+          value={jql}
+          onChange={(e) => setJql(e.currentTarget.value)}
+          onBlur={() => {
+            if (jql !== scope.jql) {
+              update((p) => void (p.squad.scope.jql = jql.trim()));
+              onChange();
+            }
+          }}
+        />
+        <TagsInput
+          label="Only these tests (optional)"
+          description="Issue keys like CALC-12, useful for a trial migration. Leave empty for everything."
+          placeholder="Type a key and press Enter"
+          value={scope.issueKeys}
+          onChange={(values) => update((p) => void (p.squad.scope.issueKeys = [...new Set(values.map((v) => v.trim().toUpperCase()).filter(Boolean))]))}
+        />
+        <Checkbox
+          label="Read files of steps"
+          description="When Zephyr Squad does not name the files in the list of steps, they are looked up step by step: one more request per step."
+          checked={scope.stepFiles}
+          onChange={(e) => {
+            const checked = e.currentTarget.checked;
+            update((p) => void (p.squad.scope.stepFiles = checked));
             onChange();
           }}
         />

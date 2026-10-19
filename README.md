@@ -1,6 +1,6 @@
 # Allure TestOps Migration
 
-A web tool that moves test cases into [Allure TestOps](https://qameta.io/) from **TestRail**, **Xray Cloud**, **Qase**, **OpenText ALM (Quality Center)**, **another Allure TestOps**, any **CSV file** or an **XML export** of another test management tool.
+A web tool that moves test cases into [Allure TestOps](https://qameta.io/) from **TestRail**, **Xray Cloud**, **Zephyr** (formerly Zephyr Scale), **Zephyr Essential** and the old **Zephyr Squad** on Jira Cloud, **Qase**, **OpenText ALM (Quality Center)**, **another Allure TestOps**, any **CSV file** or an **XML export** of another test management tool.
 
 Everything is configured in the browser: connect the systems, map the source structure and fields to Allure TestOps using live data from both sides, preview a converted case, do a dry run, then migrate. Running the migration again updates the migrated cases instead of duplicating them.
 
@@ -57,6 +57,8 @@ HOST=127.0.0.1 npm start
 
 - **TestRail**: the URL, a user email and an API key (*My Settings → API Keys*). The API must be enabled in *Administration → Site Settings → API*. Read access to the project is enough.
 - **Xray Cloud**: the Jira Cloud site, the email and an API token of an Atlassian account that can browse the project (*id.atlassian.com → Security → API tokens*), and an Xray API key: client id and client secret (*Jira → Apps → Xray → API Keys*).
+- **Zephyr**: the Jira Cloud site, the email and an API token of an Atlassian account that can browse the project, and a Zephyr API access token (*Jira, your profile menu → Zephyr API Access Tokens*).
+- **Zephyr Squad** (old experience): the Jira Cloud site, the email and an API token of an Atlassian account that can browse the project, and the Zephyr Squad API keys of the same user: access key and secret key (*Jira → Apps → Zephyr Squad → API keys*).
 - **Qase**: an API token (*your profile → API tokens*) of a user who can read the project.
 - **ALM**: the address of ALM and a user name and password, or an API key (client id and secret, ALM 12.60 and later), of a user who is a member of the project and can read its Test Plan.
 - **CSV**: the file. Exports from spreadsheets, other test management tools and Allure TestOps itself work.
@@ -126,6 +128,66 @@ Xray keeps the details of a test (type, steps, Cucumber or generic definition, f
 | Issue attachments, images in text | Test case attachments; images keep their place in text |
 
 Every migrated case gets the tag `xray:<issue key>`, in lower case like every tag: `xray:calc-12`. Xray step text and definitions are converted from Jira wiki markup; step text becomes plain text, as Allure TestOps shows step text without formatting.
+
+## Zephyr and Zephyr Essential (Jira Cloud)
+
+> **Not yet verified on a real Zephyr.** The Zephyr migration is built from the public Zephyr REST API reference and tested against a simulated Zephyr only. Check the connection, preview a few test cases and do a dry run before migrating. If something fails or looks wrong, keep *Detailed log* on (Connections step), then download the log of the run (Run step, *Download log*) or copy the log of the connection check, and attach it to an issue with a description of the problem.
+
+Create a profile with *Zephyr (Scale) or Zephyr Essential, Jira Cloud* as the source. The steps are Connections, Projects, Folders, Fields, Options, Preview and Run. It is for Zephyr (formerly Zephyr Scale) and Zephyr Essential, the new Zephyr Squad built on the same platform: test cases are entities of their own with keys such as `CALC-T12`. Both answer the [Zephyr Cloud REST API v2](https://support.smartbear.com/zephyr-scale-cloud/api-docs/), which the tool only reads. The old Zephyr Squad, where tests are Jira issues of type Test and steps come from a separate API, has a source of its own, see below.
+
+- **Connections.** The Jira site with the email and API token of an Atlassian account, the Zephyr API address and a Zephyr API access token. The address is `https://api.zephyrscale.smartbear.com/v2` by default, with `eu.`, `au.` or `de.` in front for Zephyr with data residency, and `https://prod-api.zephyr4jiracloud.com/v2` for Zephyr Essential. Zephyr does not publish its rate limits: the tool stays below *Requests per minute* (300 by default) and waits as long as Zephyr asks when it answers 429. Jira gives the keys of linked issues, the names of users (and their emails, where their privacy settings show them) and the components.
+- **Projects.** The Jira project, optionally some folders (with everything inside them) or a list of test case keys for a trial run. Files of steps need one more request per step; turn off *Read files of steps* when steps have none.
+- **Folders.** Test case folders map to one custom field per level, like TestRail sections, including the tree.
+- **Fields.** Every attribute of the test cases is listed with how often it is filled and example values. Zephyr gives the values of custom fields but not their settings, so the kind of a custom field (list, multiple choice, checkbox, user, date, number, text) is told by the values of the sampled test cases; change the target if it is guessed wrong.
+
+| Zephyr | Allure TestOps by default |
+| --- | --- |
+| Name | Test case name |
+| Folder levels 1..N | One custom field per level, and a tree |
+| Steps (description, test data, expected result, step custom fields, step files) | Scenario: step, data as a nested step, expected result, attachments |
+| Step calling another test case | Shared step named `<key> <name>`; a call with parameter values gets the called steps copied in with the values in place of `{name}` |
+| Plain text script | Scenario, one step per line |
+| BDD script | Scenario, one step per line, or the description in a code block |
+| Objective | Description, Markdown with pictures |
+| Precondition | Precondition |
+| Status | Status (Approved to Active, Draft to Draft, Deprecated to Outdated) |
+| Priority, component | Custom fields, with value mapping |
+| Labels | Tags |
+| Owner | Owner, matched by email, or by the name when Jira hides the email |
+| Covered issues | Issues of the Jira integration of the project |
+| Other issue links, web links | Links |
+| Custom fields | Custom fields; multi-line text in the description under its name; user fields as members with a role of your choice |
+| Files of the test case and its steps | Attachments; pictures in text that are files of the test case keep their place |
+
+Not available through the Zephyr API, so not migrated: comments and the history of test cases, and the parameters and test data table of a test case itself (values passed by a call are migrated). Every migrated case gets the tag `zephyr:<test case key>`, in lower case like every tag: `zephyr:calc-t12`.
+
+**Detailed log.** On by default for Zephyr. Every request to Zephyr goes to the log with its status, time and the shape of the answer: how many items, the total, whether Zephyr lowered the page size, and for the first item of every kind its field names and the kind of each value (`text 23`, `html 512`, `number`, `account id`); only short codes such as ids, keys and types are written as they are. The log also holds the statuses, priorities and folders of the project, the fields offered for mapping, the run settings without credentials, and for every test case: steps or script, calls, custom fields by kind, linked issues by type, files of the test case and its steps, the shape of picture addresses in text and whether they are files of the test case, and what the test case becomes. Tokens, emails and the text of the test cases are never written; names of test cases and files are.
+
+## Zephyr Squad, old experience (Jira Cloud)
+
+> **Not yet verified on a real Zephyr Squad.** The Zephyr Squad migration is built from the public Zephyr Squad API reference and tested against a simulated Zephyr Squad only. Check the connection, preview a few tests and do a dry run before migrating. If something fails or looks wrong, keep *Detailed log* on (Connections step), then download the log of the run or copy the log of the connection check, and attach it to an issue with a description of the problem.
+
+Create a profile with *Zephyr Squad, old experience (Jira Cloud)* as the source, for projects where tests are Jira issues of type Test. Jira may already call the app Zephyr Essential: if test cases have keys such as `CALC-T12`, the project has moved to the new experience and the Zephyr source above reads it. The steps are Connections, Projects, Fields, Options, Preview and Run; Zephyr Squad has no folders of tests.
+
+Jira keeps the issue (summary, description, all system and custom fields, comments, links, attachments), the [Zephyr Squad API](https://zephyr-squad-cloud-v1.sb-docs.com/en/zephyr-squad-cloud-rest-api.html) (ZAPI, `https://prod-api.zephyr4jiracloud.com/connect`) keeps the steps. Every request to ZAPI carries the access key and a JWT signed with the secret key for the Jira user the keys belong to, so the Jira email on the Connections step must be that user's. Like Zephyr, Zephyr Squad does not publish its rate limits: the tool stays below *Requests per minute* and waits when asked to.
+
+- **Projects.** The Jira project, the issue type of the tests (Test unless changed), an optional JQL filter and an optional list of issue keys for a trial run. When the list of steps does not name the files of a step, they are looked up step by step; turn off *Read files of steps* when steps have none.
+- **Fields.** The steps and every Jira field, by name, with how often it is filled and example values, as for Xray.
+
+| Zephyr Squad and Jira | Allure TestOps by default |
+| --- | --- |
+| Summary | Test case name |
+| Steps (step, test data, expected result in Jira wiki markup, step files) | Scenario: step, data as a nested step, expected result, attachments |
+| Description, other rich text fields | Description, Markdown with images |
+| Labels | Tags |
+| Priority, components, select fields | Custom fields, with value mapping |
+| Assignee | Owner, matched by email, or by the name when Jira hides the email |
+| Requirements (`tests` links) | Issues of the Jira integration of the project |
+| Issue key | Link back to the issue (`Jira CALC-12`) and, optionally, a test key |
+| Comments | Comments |
+| Issue attachments, images in text | Test case attachments; images keep their place in text |
+
+Every migrated case gets the tag `squad:<issue key>`, for example `squad:calc-12`. The detailed log works as for Zephyr: requests to ZAPI with their status, time and the shape of the answers, the shape of the first Jira issue, and per test the number and order of steps, which parts of steps are filled, step files and issue files, never keys, tokens or the text of the tests.
 
 ## Qase
 
@@ -264,7 +326,7 @@ npm test             # unit tests and an end-to-end migration against fake serve
 Run locally with fake TestRail and Allure TestOps servers:
 
 ```bash
-npm run dev:mocks    # TestRail on :4001, Allure TestOps on :4002, Jira and Xray Cloud on :4003, Qase on :4004, ALM on :4005
+npm run dev:mocks    # TestRail on :4001, Allure TestOps on :4002, Jira and Xray Cloud on :4003, Qase on :4004, ALM on :4005, Zephyr and Jira on :4006, Zephyr Squad and Jira on :4007
 npm run dev:server   # API and UI on :8080 (UI from packages/web/dist)
 npm run dev:web      # optional: UI with hot reload on :5173, proxies /api to :8080
 ```
@@ -276,7 +338,7 @@ docker compose -f dev-compose.yml up --build -d
 docker compose -f dev-compose.yml run --rm --build tests -d
 ```
 
-Fake server credentials: TestRail user `demo@example.com` with API key `demo-api-key`, Allure TestOps token `demo-api-token`. Inside `dev-compose.yml` use `http://mocks:4001` and `http://mocks:4002` as URLs; from the host use `http://localhost:4001` and `http://localhost:4002`. The fake Jira and Xray Cloud run on port 4003 (`http://mocks:4003` or `http://localhost:4003` for both the Jira site and the Xray API URL): Jira `demo@example.com` with token `demo-jira-token`, Xray client id `demo-client-id` and secret `demo-client-secret`. The fake Qase runs on port 4004 with the API token `demo-qase-token`: enter `http://mocks:4004` or `http://localhost:4004` as the Qase API address. The fake ALM runs on port 4005 (`http://mocks:4005` or `http://localhost:4005`): user `demo` with password `demo-password`, or API key `demo-client` with secret `demo-secret`, domain DEFAULT and project Banking.
+Fake server credentials: TestRail user `demo@example.com` with API key `demo-api-key`, Allure TestOps token `demo-api-token`. Inside `dev-compose.yml` use `http://mocks:4001` and `http://mocks:4002` as URLs; from the host use `http://localhost:4001` and `http://localhost:4002`. The fake Jira and Xray Cloud run on port 4003 (`http://mocks:4003` or `http://localhost:4003` for both the Jira site and the Xray API URL): Jira `demo@example.com` with token `demo-jira-token`, Xray client id `demo-client-id` and secret `demo-client-secret`. The fake Qase runs on port 4004 with the API token `demo-qase-token`: enter `http://mocks:4004` or `http://localhost:4004` as the Qase API address. The fake ALM runs on port 4005 (`http://mocks:4005` or `http://localhost:4005`): user `demo` with password `demo-password`, or API key `demo-client` with secret `demo-secret`, domain DEFAULT and project Banking. The fake Zephyr and Jira run on port 4006: Jira site `http://mocks:4006` or `http://localhost:4006` with `demo@example.com` and token `demo-jira-token`, Zephyr API address `http://localhost:4006/v2` (or `http://mocks:4006/v2`) with the token `demo-zephyr-token`, project CALC. The fake Zephyr Squad and Jira run on port 4007: Jira site `http://localhost:4007` with `demo@example.com` and token `demo-jira-token`, Zephyr Squad API address `http://localhost:4007/connect` with the access key `demo-access-key` and the secret key `demo-secret-key`, project CALC.
 
 ### Test data in a real Xray Cloud
 
@@ -287,6 +349,17 @@ export JIRA_URL=https://yourcompany.atlassian.net JIRA_EMAIL=you@example.com JIR
 export XRAY_CLIENT_ID=... XRAY_CLIENT_SECRET=...   # XRAY_URL for regional sites
 npx tsx dev/xray-seed.ts --project KEY --bulk 300
 npx tsx dev/xray-seed.ts --project KEY --cleanup --yes
+```
+
+### Test data in a real Zephyr
+
+`dev/zephyr-seed.ts` fills a Jira Cloud project with Zephyr test cases through the Zephyr API: nested folders, steps with formatted text, tables, test data, step custom fields and step files, calls to other test cases with and without parameters (also a call inside a call), BDD scripts with a Scenario Outline, plain text scripts, statuses (it adds *In review*), priorities, components, owners, estimates, labels, covered Jira stories, web links, files, an empty test case, a long name and non-Latin text, plus the scenarios of `dev/xray-seed-scenarios.ts` and `--bulk N` variations of them. Custom fields cannot be created through the API: create the ones listed at the top of the script in Zephyr first to get them filled. Pictures in text cannot be put there through the API either: paste one into an objective and a step by hand. Everything it creates is labelled `atm-seed`. The Zephyr API cannot delete test cases: `--cleanup` lists them and deletes the seeded Jira stories; delete the test cases in Zephyr by the label.
+
+```bash
+export JIRA_URL=https://yourcompany.atlassian.net JIRA_EMAIL=you@example.com JIRA_API_TOKEN=...
+export ZEPHYR_API_TOKEN=...   # ZEPHYR_URL for regions and Zephyr Essential
+npx tsx dev/zephyr-seed.ts --project KEY --bulk 300
+npx tsx dev/zephyr-seed.ts --project KEY --cleanup --yes
 ```
 
 ### Test data in a real Qase
@@ -314,9 +387,9 @@ npx tsx dev/testrail-seed.ts --bulk 300
 ```
 packages/
   shared/   profile schema (zod), API types, default mappings, section level mapping
-  server/   Fastify API, TestRail, Jira, Xray, Qase, ALM and Allure TestOps clients, CSV and XML reading, conversion, migration engine
+  server/   Fastify API, TestRail, Jira, Xray, Zephyr, Zephyr Squad, Qase, ALM and Allure TestOps clients, CSV and XML reading, conversion, migration engine
   web/      React + Mantine UI
-  mocks/    fake TestRail, Jira with Xray Cloud, Qase, ALM and Allure TestOps servers with synthetic projects
+  mocks/    fake TestRail, Jira with Xray Cloud, Zephyr with Jira, Zephyr Squad with Jira, Qase, ALM and Allure TestOps servers with synthetic projects
 ```
 
 The conversion is split into a pure transformation (`server/src/convert`), which turns a TestRail case into a planned Allure TestOps case and backs both the preview and the migration, and a writer (`server/src/engine/writer.ts`) that applies the plan idempotently.

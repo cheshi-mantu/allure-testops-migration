@@ -137,7 +137,7 @@ export interface ExplainContext {
   service: Service;
 }
 
-export type Service = "Allure TestOps" | "TestRail" | "Jira" | "Xray" | "Qase" | "ALM";
+export type Service = "Allure TestOps" | "TestRail" | "Jira" | "Xray" | "Zephyr" | "Zephyr Squad" | "Qase" | "ALM";
 
 const CREDENTIAL_HINTS: Record<Service, string> = {
   TestRail: "The user email or API key is wrong, or the API key was deleted. Create a new API key in TestRail (My Settings, API Keys) and enter it on the Connections step.",
@@ -145,6 +145,8 @@ const CREDENTIAL_HINTS: Record<Service, string> = {
   Jira: "The email or API token is wrong, or the token was revoked. Create an API token for the Atlassian account (id.atlassian.com, Security, API tokens) and enter it on the Connections step.",
   Qase: "The API token is wrong or was revoked. Create a new token in Qase (your profile, API tokens) and enter it on the Connections step.",
   ALM: "The user name and password, or the client id and secret of the API key, are wrong, or the user is not allowed into ALM. Check them by logging in to ALM, then enter them on the Connections step.",
+  Zephyr: "The Zephyr API access token is wrong or was revoked, or the API address does not match your Zephyr (Zephyr Essential and the regions of Zephyr have their own addresses). Create a token in Jira (your profile menu, Zephyr API Access Tokens) and enter it on the Connections step.",
+  "Zephyr Squad": "The access key or secret key of the Zephyr Squad API keys is wrong or was revoked, or the keys belong to another Jira user than the email on the Connections step: requests are signed for that user. Create API keys in Jira (Apps, Zephyr Squad, API keys) as that user.",
   Xray: "The Xray API key (client id and secret) is wrong or was revoked, or the region does not match the Jira site. Create an API key in Jira (Apps, Xray, API Keys) and enter it on the Connections step.",
 };
 
@@ -203,6 +205,10 @@ export function explain(error: unknown, operation: Operation, context: ExplainCo
             ? "The ALM user must be a member of the project and allowed to read the Test Plan. Ask an ALM project administrator, or use another user."
           : service === "Qase"
             ? "The role of the Qase user who owns the API token must be able to read the project, its test cases and shared steps. Ask a Qase administrator, or use the token of another user."
+            : service === "Zephyr Squad"
+              ? "The Jira user the API keys belong to must be able to browse the project and its tests. Ask a Jira administrator for the Browse projects permission in this project."
+            : service === "Zephyr"
+              ? "The user who owns the Zephyr API access token must be able to browse the Jira project and see its test cases. Ask a Jira administrator for the Browse projects permission in this project, or use the token of another user."
             : service === "Jira" || service === "Xray"
               ? "The Jira user must be able to browse the project, its issues and attachments. Ask a Jira administrator for the Browse projects permission in this project."
             : `Use the token of a user who can edit test cases in project #${project}, or ask a project administrator to grant that permission.${operation === "create a custom field" || operation === "create the tree" ? " Creating custom fields and trees needs project or instance administrator rights." : ""}`,
@@ -214,7 +220,7 @@ export function explain(error: unknown, operation: Operation, context: ExplainCo
     return {
       key: key("429"),
       title: `${service} limited the number of requests.`,
-      hint: `Lower "Cases migrated in parallel" on the Options step${service === "TestRail" ? " or the TestRail API rate limit on the Connections step" : ""}, then run again. Migrated cases are updated, not duplicated.`,
+      hint: `Lower "Cases migrated in parallel" on the Options step${service === "TestRail" ? " or the TestRail API rate limit on the Connections step" : service === "Zephyr" || service === "Zephyr Squad" ? ` or "Requests per minute" for ${service} on the Connections step` : ""}, then run again. Migrated cases are updated, not duplicated.`,
       fix: { step: "options" },
       detail,
     };
@@ -336,6 +342,12 @@ export function serviceOf(error: unknown, profile: Profile): Service {
     }
     if (profile.source === "alm" && !startsWith(profile.testops.connection.endpoint)) {
       return "ALM";
+    }
+    if (profile.source === "squad" && !startsWith(profile.testops.connection.endpoint)) {
+      return startsWith(profile.squad.connection.jiraUrl) ? "Jira" : "Zephyr Squad";
+    }
+    if (profile.source === "zephyr" && !startsWith(profile.testops.connection.endpoint)) {
+      return startsWith(profile.zephyr.connection.jiraUrl) ? "Jira" : "Zephyr";
     }
     if (profile.source === "xray" && !startsWith(profile.testops.connection.endpoint)) {
       if (/getxray\.app|\/api\/v\d+\/(?:graphql|authenticate|attachments?)/.test(cause.url)) {

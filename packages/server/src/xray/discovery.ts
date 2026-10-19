@@ -2,8 +2,10 @@ import type { Profile, SectionLevelInfo, SourceDiscovery } from "@atm/shared";
 import { KnownProblem } from "../engine/problems.js";
 import type { RetryInfo } from "../http/httpClient.js";
 import { folderLevels, XrayCatalog } from "./catalog.js";
-import { JiraClient, scopeJql, XrayClient } from "./client.js";
-import type { JiraField, JiraIssue, JiraProject, XrayCase, XrayStep } from "./types.js";
+import { JiraClient, scopeJql } from "../jira/client.js";
+import type { JiraField, JiraIssue, JiraProject } from "../jira/types.js";
+import { XrayClient } from "./client.js";
+import type { XrayCase, XrayStep } from "./types.js";
 
 const SAMPLE_SIZE = 300;
 const EXAMPLE_PATHS = 5;

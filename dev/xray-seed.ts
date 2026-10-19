@@ -14,7 +14,8 @@
  *
  * The project needs the Xray issue types (Test, Precondition, Test Set, Test Plan) and Story.
  */
-import { JiraClient, XrayClient } from "../packages/server/src/xray/client.js";
+import { JiraClient } from "../packages/server/src/jira/client.js";
+import { XrayClient } from "../packages/server/src/xray/client.js";
 import { COMPONENTS, folderPaths, generate, SCENARIOS, VERSIONS, type GeneratedTest, type PreconditionName } from "./xray-seed-scenarios.js";
 
 const LABEL = "atm-seed";

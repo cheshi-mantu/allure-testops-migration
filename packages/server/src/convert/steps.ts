@@ -99,7 +99,7 @@ export function textSteps(raw: string, mode: "lines" | "single", options: TextOp
       chunks[previous] += `\n${line}`;
       continue;
     }
-    chunks.push(line.replace(/^\s*(?:\d+[.)]|[-*•])\s+/, ""));
+    chunks.push(line.replace(/^\s*(?:\d+\\?[.)]|\\?[-*•])\s+/, ""));
   }
   // Chunks are Markdown already; convert again only to split tables and images out of the body.
   return placeExamples(

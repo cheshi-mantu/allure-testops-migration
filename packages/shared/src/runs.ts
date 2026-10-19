@@ -14,6 +14,10 @@ export function runSource(profile: Profile): string {
       return `qase:${profile.qase.connection.endpoint.replace(/\/+$/, "")}#${profile.qase.scope.projectCode}`;
     case "alm":
       return `alm:${profile.alm.connection.endpoint.replace(/\/+$/, "")}#${profile.alm.scope.domain}#${profile.alm.scope.project}`;
+    case "squad":
+      return `squad:${profile.squad.connection.jiraUrl.replace(/\/+$/, "")}#${profile.squad.scope.projectKey}#${profile.squad.scope.issueType}#${profile.squad.scope.jql.trim()}`;
+    case "zephyr":
+      return `zephyr:${profile.zephyr.connection.jiraUrl.replace(/\/+$/, "")}#${profile.zephyr.scope.projectKey}`;
     case "xray":
       return `xray:${profile.xray.connection.jiraUrl.replace(/\/+$/, "")}#${profile.xray.scope.projectKey}#${profile.xray.scope.jql.trim()}`;
     default:

@@ -25,7 +25,7 @@ COPY packages/mocks/package.json packages/mocks/
 RUN npm ci --omit=dev --workspace @atm/mocks --no-audit --no-fund
 COPY --from=build /src/packages/mocks/dist packages/mocks/dist
 USER node
-EXPOSE 4001 4002 4003 4004 4005
+EXPOSE 4001 4002 4003 4004 4005 4006 4007
 CMD ["node", "packages/mocks/dist/main.js"]
 
 # ---------------------------------------------------------------- application

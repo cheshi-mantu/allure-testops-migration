@@ -9,6 +9,8 @@
 #   Jira and Xray   http://mocks:4003   for both URLs; Jira demo@example.com / demo-jira-token, Xray demo-client-id / demo-client-secret
 #   Qase            http://mocks:4004   API token demo-qase-token (the Qase API address on the Connections step)
 #   ALM             http://mocks:4005   user demo / demo-password, or API key demo-client / demo-secret; domain DEFAULT, project Banking
+#   Zephyr Squad    http://mocks:4007   Jira site http://mocks:4007 (demo@example.com / demo-jira-token), Zephyr Squad API http://mocks:4007/connect (keys demo-access-key / demo-secret-key)
+#   Zephyr and Jira http://mocks:4006   Jira site http://mocks:4006 (demo@example.com / demo-jira-token), Zephyr API http://mocks:4006/v2 (token demo-zephyr-token)
 
 services:
   app:
@@ -34,6 +36,8 @@ services:
       - "127.0.0.1:4003:4003"
       - "127.0.0.1:4004:4004"
       - "127.0.0.1:4005:4005"
+      - "127.0.0.1:4006:4006"
+      - "127.0.0.1:4007:4007"
 
   tests:
     build:

@@ -12,6 +12,8 @@ export interface ConnectionCheck {
   message: string;
   /** Server version or user name when the service reports it. */
   details?: string;
+  /** Another API address of the same service that accepts the credentials, when the entered one does not. */
+  suggestedEndpoint?: string;
 }
 
 // ---------------------------------------------------------------- TestRail discovery
@@ -86,7 +88,7 @@ export interface SuiteStructure {
 
 /** What the mapping screens show about the source: structure, fields and sample cases. */
 export interface SourceDiscovery {
-  source: "testrail" | "csv" | "xray" | "xml" | "qase" | "alm" | "testops";
+  source: "testrail" | "csv" | "xray" | "zephyr" | "squad" | "xml" | "qase" | "alm" | "testops";
   project: NamedId & { suiteMode: number };
   suites: NamedId[];
   structure: SuiteStructure[];
@@ -353,7 +355,7 @@ export interface RunLogEntry {
 export interface ProfileListItem {
   id: string;
   name: string;
-  source: "testrail" | "csv" | "xray" | "xml" | "qase" | "alm" | "testops";
+  source: "testrail" | "csv" | "xray" | "zephyr" | "squad" | "xml" | "qase" | "alm" | "testops";
   /** CSV and XML: name of the chosen file. */
   fileName: string | null;
   updatedAt: string;
@@ -364,6 +366,8 @@ export interface ProfileListItem {
   qaseProject?: string;
   /** ALM: domain and project, e.g. DEFAULT / Banking. */
   almProject?: string;
+  zephyrProject?: string;
+  squadProject?: string;
   /** Allure TestOps source: names of the chosen projects. */
   testopsProjects?: string[];
   testopsEndpoint: string;

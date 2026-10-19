@@ -80,7 +80,7 @@ export function ProfilesPage() {
           <Stack align="center" gap="xs">
             <Title order={4}>No profiles yet</Title>
             <Text c="dimmed" ta="center" maw={520}>
-              Create a profile to migrate from TestRail, Xray Cloud, Qase, ALM, a CSV or an XML file: map structure and fields using the real data, preview the result
+              Create a profile to migrate from TestRail, Xray Cloud, Zephyr, Qase, ALM, a CSV or an XML file: map structure and fields using the real data, preview the result
               and run the migration. Or import a profile exported on another machine.
             </Text>
             <Button mt="sm" leftSection={<IconPlus size={16} />} onClick={() => setCreating(true)}>
@@ -110,6 +110,10 @@ export function ProfilesPage() {
                   ? `Allure TestOps: ${profile.testopsProjects?.length ? profile.testopsProjects.join(", ") : "no projects chosen"}`
                   : profile.source === "xray"
                   ? `Xray project ${profile.xrayProject || "not chosen"}`
+                  : profile.source === "zephyr"
+                  ? `Zephyr project ${profile.zephyrProject || "not chosen"}`
+                  : profile.source === "squad"
+                  ? `Zephyr Squad project ${profile.squadProject || "not chosen"}`
                   : profile.testrailEndpoint || "not set"}
             </Text>
             <Text size="sm" c="dimmed" truncate>
@@ -137,7 +141,7 @@ export function ProfilesPage() {
                 const next = value as SourceType;
                 setSource(next);
                 if (!nameTouched) {
-                  setName(next === "csv" ? "CSV import" : next === "xml" ? "XML import" : next === "xray" ? "Xray migration" : next === "qase" ? "Qase migration" : next === "alm" ? "ALM migration" : next === "testops" ? "Allure TestOps copy" : "TestRail migration");
+                  setName(next === "csv" ? "CSV import" : next === "xml" ? "XML import" : next === "xray" ? "Xray migration" : next === "zephyr" ? "Zephyr migration" : next === "squad" ? "Zephyr Squad migration" : next === "qase" ? "Qase migration" : next === "alm" ? "ALM migration" : next === "testops" ? "Allure TestOps copy" : "TestRail migration");
                 }
               }}
             >
@@ -147,6 +151,16 @@ export function ProfilesPage() {
                   value="xray"
                   label="Xray Cloud"
                   description="Reads Xray tests of a Jira Cloud project: steps, Cucumber and generic definitions, folders, preconditions, test sets and plans, and every Jira field."
+                />
+                <Radio
+                  value="zephyr"
+                  label="Zephyr (Scale) or Zephyr Essential, Jira Cloud"
+                  description="Reads Zephyr test cases (keys such as CALC-T12) of a Jira Cloud project: folders, steps, called test cases, plain text and BDD scripts, statuses, priorities, custom fields, linked issues and files. Not yet verified on a real Zephyr: start with a dry run, with the detailed log on."
+                />
+                <Radio
+                  value="squad"
+                  label="Zephyr Squad, old experience (Jira Cloud)"
+                  description="Reads tests that are Jira issues of type Test: steps with test data, expected results and files, and every Jira field, comment, link and attachment of the issue. Not yet verified on a real Zephyr Squad: start with a dry run, with the detailed log on."
                 />
                 <Radio
                   value="testops"

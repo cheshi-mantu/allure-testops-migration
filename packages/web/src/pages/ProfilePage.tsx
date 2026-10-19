@@ -208,6 +208,74 @@ const XRAY_STEPS: StepDef[] = [
   },
 ];
 
+const ZEPHYR_STEPS: StepDef[] = [
+  {
+    key: "connections",
+    label: "Connections",
+    description: "Zephyr, Jira and Allure TestOps access",
+    icon: <IconPlugConnected size={16} />,
+    done: (p) => {
+      const c = p.zephyr.connection;
+      return Boolean(hasSecret(c.apiToken) && c.jiraUrl && c.jiraEmail && hasSecret(c.jiraApiToken) && p.testops.connection.endpoint && hasSecret(p.testops.connection.apiToken));
+    },
+    render: () => <ConnectionsStep />,
+  },
+  {
+    key: "scope",
+    label: "Projects",
+    description: "Which test cases and where",
+    icon: <IconTarget size={16} />,
+    done: (p) => Boolean(p.zephyr.scope.projectKey && p.testops.scope.projectId),
+    render: () => <ScopeStep />,
+  },
+  {
+    key: "structure",
+    label: "Folders",
+    description: "Folder levels → custom fields",
+    icon: <IconHierarchy2 size={16} />,
+    done: (p) => p.structure.levels.some(Boolean),
+    render: () => <StructureStep />,
+  },
+  {
+    key: "fields",
+    label: "Fields",
+    description: "Zephyr fields → Allure TestOps",
+    icon: <IconListDetails size={16} />,
+    done: (p) => p.fields.length > 0,
+    render: () => <FieldsStep />,
+  },
+];
+
+const SQUAD_STEPS: StepDef[] = [
+  {
+    key: "connections",
+    label: "Connections",
+    description: "Zephyr Squad, Jira and Allure TestOps access",
+    icon: <IconPlugConnected size={16} />,
+    done: (p) => {
+      const c = p.squad.connection;
+      return Boolean(c.accessKey && hasSecret(c.secretKey) && c.jiraUrl && c.jiraEmail && hasSecret(c.jiraApiToken) && p.testops.connection.endpoint && hasSecret(p.testops.connection.apiToken));
+    },
+    render: () => <ConnectionsStep />,
+  },
+  {
+    key: "scope",
+    label: "Projects",
+    description: "Which tests and where",
+    icon: <IconTarget size={16} />,
+    done: (p) => Boolean(p.squad.scope.projectKey && p.testops.scope.projectId),
+    render: () => <ScopeStep />,
+  },
+  {
+    key: "fields",
+    label: "Fields",
+    description: "Zephyr Squad and Jira fields → Allure TestOps",
+    icon: <IconListDetails size={16} />,
+    done: (p) => p.fields.length > 0,
+    render: () => <FieldsStep />,
+  },
+];
+
 const QASE_STEPS: StepDef[] = [
   {
     key: "connections",
@@ -330,7 +398,7 @@ const COMMON_STEPS: StepDef[] = [
 ];
 
 function stepsFor(profile: Profile): StepDef[] {
-  const sourceSteps = profile.source === "csv" ? CSV_STEPS : profile.source === "xml" ? XML_STEPS : profile.source === "xray" ? XRAY_STEPS : profile.source === "qase" ? QASE_STEPS : profile.source === "alm" ? ALM_STEPS : profile.source === "testops" ? TESTOPS_SOURCE_STEPS : TESTRAIL_STEPS;
+  const sourceSteps = profile.source === "csv" ? CSV_STEPS : profile.source === "xml" ? XML_STEPS : profile.source === "xray" ? XRAY_STEPS : profile.source === "zephyr" ? ZEPHYR_STEPS : profile.source === "squad" ? SQUAD_STEPS : profile.source === "qase" ? QASE_STEPS : profile.source === "alm" ? ALM_STEPS : profile.source === "testops" ? TESTOPS_SOURCE_STEPS : TESTRAIL_STEPS;
   return [...sourceSteps, ...COMMON_STEPS];
 }
 

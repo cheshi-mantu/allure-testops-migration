@@ -118,6 +118,88 @@ export const QaseScopeSchema = z.object({
 });
 export type QaseScope = z.infer<typeof QaseScopeSchema>;
 
+/**
+ * Addresses of the Zephyr Cloud REST API v2 (formerly Zephyr Scale). Zephyr Essential (the new
+ * Zephyr Squad, built on the same platform) answers the same API at its own address.
+ */
+export const ZEPHYR_REGIONS = [
+  { value: "https://api.zephyrscale.smartbear.com/v2", label: "Zephyr, default region (api.zephyrscale.smartbear.com)" },
+  { value: "https://eu.api.zephyrscale.smartbear.com/v2", label: "Zephyr, European Union" },
+  { value: "https://au.api.zephyrscale.smartbear.com/v2", label: "Zephyr, Australia" },
+  { value: "https://de.api.zephyrscale.smartbear.com/v2", label: "Zephyr, Germany" },
+  { value: "https://prod-api.zephyr4jiracloud.com/v2", label: "Zephyr Essential (prod-api.zephyr4jiracloud.com)" },
+] as const;
+
+/**
+ * Zephyr keeps the test cases (folders, steps, scripts, statuses, custom fields, files); Jira knows
+ * the issues they cover, the users and the components: a migration reads both.
+ */
+export const ZephyrConnectionSchema = z.object({
+  /** Zephyr REST API v2 address, see {@link ZEPHYR_REGIONS}. */
+  endpoint: z.string().default("https://api.zephyrscale.smartbear.com/v2"),
+  /** Zephyr API access token (Jira, your profile menu, Zephyr API Access Tokens). */
+  apiToken: z.string().default(""),
+  /** Jira Cloud site, e.g. https://yourcompany.atlassian.net. */
+  jiraUrl: z.string().default(""),
+  jiraEmail: z.string().default(""),
+  /** Atlassian API token of the Jira user. */
+  jiraApiToken: z.string().default(""),
+  /** Zephyr does not publish its limits; the tool paces itself to this many requests per minute and waits when asked to. */
+  requestsPerMinute: z.number().int().min(10).max(6000).default(300),
+});
+export type ZephyrConnection = z.infer<typeof ZephyrConnectionSchema>;
+
+export const ZephyrScopeSchema = z.object({
+  /** Jira project key, e.g. CALC. */
+  projectKey: z.string().default(""),
+  /** Only test cases of these folders and of the folders inside them. Empty means the whole project. */
+  folderIds: z.array(z.number().int().positive()).default([]),
+  /** When not empty only these test cases (keys such as CALC-T12) are migrated. */
+  testCaseKeys: z.array(z.string()).default([]),
+  /** Files of steps need one more request per step; without them a migration is faster. */
+  stepFiles: z.boolean().default(true),
+});
+export type ZephyrScope = z.infer<typeof ZephyrScopeSchema>;
+
+/** The API of the old Zephyr Squad, where tests are Jira issues of type Test. */
+export const SQUAD_ENDPOINT = "https://prod-api.zephyr4jiracloud.com/connect";
+
+/**
+ * The old Zephyr Squad (now shown as Zephyr Essential in Jira, but not yet moved to the new
+ * experience): Jira keeps the test issue (summary, description, fields, comments, links,
+ * attachments), the Zephyr Squad API (ZAPI) keeps the test steps.
+ */
+export const SquadConnectionSchema = z.object({
+  /** Zephyr Squad API address, see {@link SQUAD_ENDPOINT}. */
+  endpoint: z.string().default(SQUAD_ENDPOINT),
+  /** API keys of a Jira user (Jira, Apps, Zephyr Squad, API keys): the access key and the secret key. */
+  accessKey: z.string().default(""),
+  secretKey: z.string().default(""),
+  /** Jira Cloud site, e.g. https://yourcompany.atlassian.net. */
+  jiraUrl: z.string().default(""),
+  /** The Jira user the API keys belong to: requests to Zephyr Squad are signed for this account. */
+  jiraEmail: z.string().default(""),
+  /** Atlassian API token of the Jira user. */
+  jiraApiToken: z.string().default(""),
+  /** Zephyr Squad limits requests per user per minute without saying how many; the tool paces itself and waits when asked to. */
+  requestsPerMinute: z.number().int().min(10).max(6000).default(300),
+});
+export type SquadConnection = z.infer<typeof SquadConnectionSchema>;
+
+export const SquadScopeSchema = z.object({
+  /** Jira project key, e.g. CALC. */
+  projectKey: z.string().default(""),
+  /** Jira issue type of the tests. */
+  issueType: z.string().default("Test"),
+  /** Narrows the tests with JQL, e.g. `labels = regression`. Combined with the project and the issue type. */
+  jql: z.string().default(""),
+  /** When not empty only these tests (issue keys) are migrated. */
+  issueKeys: z.array(z.string()).default([]),
+  /** Files of steps the step list does not name are looked up step by step; without them reading is faster. */
+  stepFiles: z.boolean().default(true),
+});
+export type SquadScope = z.infer<typeof SquadScopeSchema>;
+
 export const ALM_AUTH = ["password", "apiKey"] as const;
 
 /** OpenText (Micro Focus, HP) ALM / Quality Center, read through its REST API. */
@@ -209,7 +291,7 @@ export const StructureMappingSchema = z.object({
 });
 export type StructureMapping = z.infer<typeof StructureMappingSchema>;
 
-export const SOURCES = ["testrail", "csv", "xray", "xml", "qase", "alm", "testops"] as const;
+export const SOURCES = ["testrail", "csv", "xray", "zephyr", "squad", "xml", "qase", "alm", "testops"] as const;
 export type SourceType = (typeof SOURCES)[number];
 
 /** Sources that read an uploaded file instead of connecting to a system. */
@@ -356,7 +438,7 @@ export const MigrationOptionsSchema = z.object({
   migrationTagPrefix: z.string().default("testrail"),
   /** Extra tag put on every migrated case, e.g. the migration date. */
   additionalTag: z.string().default(""),
-  /** Add a link back to the source case (TestRail, Xray, Qase). ALM tests have no web address, so ALM ignores it. */
+  /** Add a link back to the source case (TestRail, Xray, Zephyr, Qase). ALM tests have no web address, so ALM ignores it. */
   selfLink: z.boolean().default(true),
   /** How to read TestRail text: `auto` detects HTML produced by the new TestRail editor. */
   textFormat: z.enum(["auto", "markdown", "html"]).default("auto"),
@@ -397,6 +479,24 @@ export const ProfileSchema = z.object({
     connection: XrayConnectionSchema.prefault({}),
     scope: XrayScopeSchema.prefault({}),
   }).prefault({}),
+  zephyr: z.object({
+    connection: ZephyrConnectionSchema.prefault({}),
+    scope: ZephyrScopeSchema.prefault({}),
+    /**
+     * Requests to Zephyr and Jira, the structure of their answers (field names and kinds of values,
+     * not the text of test cases) and what was read for every test case go to the run log at the debug level.
+     */
+    detailedLog: z.boolean().default(true),
+  }).prefault({}),
+  squad: z.object({
+    connection: SquadConnectionSchema.prefault({}),
+    scope: SquadScopeSchema.prefault({}),
+    /**
+     * Requests to Zephyr Squad, the structure of their answers (field names and kinds of values, not
+     * the text of tests) and what was read for every test go to the run log at the debug level.
+     */
+    detailedLog: z.boolean().default(true),
+  }).prefault({}),
   qase: z.object({
     connection: QaseConnectionSchema.prefault({}),
     scope: QaseScopeSchema.prefault({}),
@@ -428,6 +528,10 @@ export const SECRET_PATHS = [
   ["testrail", "connection", "sessionCookie"],
   ["xray", "connection", "clientSecret"],
   ["xray", "connection", "jiraApiToken"],
+  ["zephyr", "connection", "apiToken"],
+  ["zephyr", "connection", "jiraApiToken"],
+  ["squad", "connection", "secretKey"],
+  ["squad", "connection", "jiraApiToken"],
   ["xml", "files", "password"],
   ["xml", "files", "headerValue"],
   ["qase", "connection", "apiToken"],

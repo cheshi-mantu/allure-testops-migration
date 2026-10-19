@@ -19,7 +19,15 @@ import { idOf, one, type AlmTest } from "../alm/types.js";
 import { loadQaseContext, readQaseCases } from "../qase/discovery.js";
 import { qaseCaseKey, transformQaseCase } from "../qase/transform.js";
 import type { QaseCase } from "../qase/types.js";
+import { testSummary as squadTestSummary } from "../squad/diagnostics.js";
+import { loadSquadContext, readSquadCases } from "../squad/discovery.js";
+import { transformSquadCase } from "../squad/transform.js";
+import type { SquadCase } from "../squad/types.js";
 import { XrayAssets } from "../xray/assets.js";
+import { caseSummary, pictures } from "../zephyr/diagnostics.js";
+import { loadZephyrContext, parseTestCaseKey, readCalledTests as readZephyrCalledTests, readZephyrCases } from "../zephyr/discovery.js";
+import { filesOf, matchingFile, transformZephyrCase } from "../zephyr/transform.js";
+import type { ZephyrCase } from "../zephyr/types.js";
 import { loadXrayContext, readCalledTests, readXrayCases } from "../xray/discovery.js";
 import { transformXrayCase, type XrayContext } from "../xray/transform.js";
 import type { XrayCase } from "../xray/types.js";
@@ -86,6 +94,10 @@ function readySource(profile: Profile, deps: SourceDeps, log: Log, onRetry?: (in
       return prepareQase(profile, log, onRetry);
     case "alm":
       return prepareAlm(profile, log, onRetry);
+    case "zephyr":
+      return prepareZephyr(profile, log, onRetry);
+    case "squad":
+      return prepareSquad(profile, log, onRetry);
     case "testops":
       return prepareFromTestOps(profile, log, onRetry) as Promise<PreparedSource>;
     default:
@@ -192,6 +204,97 @@ async function prepareAlm(profile: Profile, log: Log, onRetry?: (info: RetryInfo
         logCase("info", `${context.called.size} test(s) are called by steps of other tests.`);
       }
       return tests.map((raw) => ({ key: String(idOf(raw.test)), title: one(raw.test, "name") ?? almLabel(idOf(raw.test)), label: almLabel(idOf(raw.test)), raw }));
+    },
+  };
+}
+
+type ZephyrSourceCase = SourceCase & { raw: ZephyrCase };
+
+async function prepareZephyr(profile: Profile, log: Log, onRetry?: (info: RetryInfo) => void): Promise<PreparedSource<ZephyrSourceCase>> {
+  const detailed = profile.zephyr.detailedLog;
+  const trace = (message: string, caseId?: string) => log("debug", `Zephyr: ${message}`, caseId);
+  if (detailed) {
+    // The settings the run uses, without credentials, so the log alone explains what happened.
+    const settings = maskSecrets(profile, "strip");
+    trace(`Detailed log is on. Tool on Node.js ${process.version}. Settings: ${JSON.stringify({ zephyr: { ...settings.zephyr, connection: { ...settings.zephyr.connection, jiraEmail: settings.zephyr.connection.jiraEmail ? "(set)" : "" } }, structure: settings.structure, options: settings.options, fields: settings.fields })}`);
+  }
+  const context = await loadZephyrContext(profile, onRetry, trace);
+  context.warnings.forEach((warning) => log("warn", warning));
+  log("info", `Zephyr project ${context.project.key}: ${context.totalTests} test case(s), ${context.folders.length} folder(s).`);
+  return {
+    name: "Zephyr",
+    assets: context.assets,
+    testrail: null,
+    transform: (testCase) => {
+      const result = transformZephyrCase(testCase.raw, context);
+      if (detailed) {
+        const files = filesOf(testCase.raw);
+        trace(`${testCase.key}: ${caseSummary(testCase.raw, result.planned, (source) => matchingFile(source, files) !== null || context.assets.isApiAddress(source))}`, testCase.key);
+      }
+      return result;
+    },
+    readCases: async (logCase, isCancelled) => {
+      const cases: ZephyrCase[] = [];
+      for await (const page of readZephyrCases(context, profile)) {
+        cases.push(...page);
+        logCase("info", `Read ${cases.length} test case(s) from Zephyr...`);
+        if (isCancelled()) {
+          break;
+        }
+      }
+      const keys = profile.zephyr.scope.testCaseKeys.map((raw) => ({ raw, key: parseTestCaseKey(raw) }));
+      keys
+        .filter(({ key }) => !key || !cases.some((c) => c.testCase.key === key))
+        .forEach(({ raw, key }) => logCase("warn", key ? `${key} is not a Zephyr test case the API token can read.` : `"${raw}" is not a Zephyr test case key, such as ${context.project.key}-T12.`, key ?? raw));
+      await readZephyrCalledTests(context, cases);
+      if (context.called.size > 0) {
+        logCase("info", `${context.called.size} test case(s) are called by steps of other test cases.`);
+      }
+      const withPictures = cases.filter((c) => pictures(c).length > 0).length;
+      if (detailed && withPictures > 0) {
+        trace(`${withPictures} test case(s) have pictures in their text.`);
+      }
+      return cases.map((raw) => ({ key: raw.testCase.key, title: raw.testCase.name || raw.testCase.key, label: raw.testCase.key, raw }));
+    },
+  };
+}
+
+type SquadSourceCase = SourceCase & { raw: SquadCase };
+
+async function prepareSquad(profile: Profile, log: Log, onRetry?: (info: RetryInfo) => void): Promise<PreparedSource<SquadSourceCase>> {
+  const detailed = profile.squad.detailedLog;
+  const trace = (message: string, caseId?: string) => log("debug", `Zephyr Squad: ${message}`, caseId);
+  if (detailed) {
+    // The settings the run uses, without credentials, so the log alone explains what happened.
+    const settings = maskSecrets(profile, "strip");
+    trace(`Detailed log is on. Tool on Node.js ${process.version}. Settings: ${JSON.stringify({ squad: { ...settings.squad, connection: { ...settings.squad.connection, accessKey: settings.squad.connection.accessKey ? "(set)" : "", jiraEmail: settings.squad.connection.jiraEmail ? "(set)" : "" } }, options: settings.options, fields: settings.fields })}`);
+  }
+  const context = await loadSquadContext(profile, onRetry, trace);
+  context.warnings.forEach((warning) => log("warn", warning));
+  log("info", `Jira project ${context.project.key}: about ${context.totalTests ?? "?"} Zephyr Squad test(s), issue type "${context.issueType}".`);
+  return {
+    name: "Jira and Zephyr Squad",
+    assets: context.assets,
+    testrail: null,
+    transform: (testCase) => {
+      const result = transformSquadCase(testCase.raw, context);
+      if (detailed) {
+        trace(`${testCase.key}: ${squadTestSummary(testCase.raw, result.planned)}`, testCase.key);
+      }
+      return result;
+    },
+    readCases: async (logCase, isCancelled) => {
+      const cases: SquadCase[] = [];
+      for await (const page of readSquadCases(context, profile)) {
+        cases.push(...page);
+        logCase("info", `Read ${cases.length} test(s) from Jira and Zephyr Squad...`);
+        if (isCancelled()) {
+          break;
+        }
+      }
+      const missing = profile.squad.scope.issueKeys.filter((key) => !cases.some((c) => c.issue.key === key.trim().toUpperCase()));
+      missing.forEach((key) => logCase("warn", `${key} is not a test of type "${context.issueType}" in project ${context.project.key}, or does not match the JQL filter.`, key));
+      return cases.map((raw) => ({ key: raw.issue.key, title: String(raw.issue.fields.summary ?? raw.issue.key), label: raw.issue.key, raw }));
     },
   };
 }
