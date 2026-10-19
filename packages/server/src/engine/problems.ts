@@ -145,7 +145,7 @@ const CREDENTIAL_HINTS: Record<Service, string> = {
   Jira: "The email or API token is wrong, or the token was revoked. Create an API token for the Atlassian account (id.atlassian.com, Security, API tokens) and enter it on the Connections step.",
   Qase: "The API token is wrong or was revoked. Create a new token in Qase (your profile, API tokens) and enter it on the Connections step.",
   ALM: "The user name and password, or the client id and secret of the API key, are wrong, or the user is not allowed into ALM. Check them by logging in to ALM, then enter them on the Connections step.",
-  Zephyr: "The Zephyr API access token is wrong or was revoked, or the API address does not match your Zephyr (Zephyr Essential and the regions of Zephyr have their own addresses). Create a token in Jira (your profile menu, Zephyr API keys) and enter it on the Connections step.",
+  Zephyr: "The Zephyr API access token is wrong or was revoked, or the API address does not match your Zephyr (Zephyr Essential and the regions of Zephyr have their own addresses). Create a token in Jira (your profile menu, Zephyr API Access Tokens) and enter it on the Connections step.",
   "Zephyr Squad": "The access key or secret key of the Zephyr Squad API keys is wrong or was revoked, or the keys belong to another Jira user than the email on the Connections step: requests are signed for that user. Create API keys in Jira (Apps, Zephyr Squad, API keys) as that user.",
   Xray: "The Xray API key (client id and secret) is wrong or was revoked, or the region does not match the Jira site. Create an API key in Jira (Apps, Xray, API Keys) and enter it on the Connections step.",
 };

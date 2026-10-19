@@ -635,7 +635,7 @@ function ZephyrConnectionCard() {
           label="Zephyr API access token"
           description={
             <>
-              In Jira, open your profile menu and choose <i>Zephyr API keys</i>. The token reads what its user can see.
+              In Jira, open your profile menu and choose <i>Zephyr API Access Tokens</i>. The token reads what its user can see.
             </>
           }
           placeholder={secretPlaceholder(zc.apiToken)}

@@ -1,4 +1,4 @@
-import type { ZephyrConnection } from "@atm/shared";
+import { ZEPHYR_REGIONS, type ZephyrConnection } from "@atm/shared";
 import { HttpClient, HttpError, type Query, type RetryInfo } from "../http/httpClient.js";
 import { sharedRateLimiter } from "../http/rateLimiter.js";
 import { shapeOf } from "./diagnostics.js";
@@ -29,6 +29,25 @@ export function failureText(error: unknown): string {
     return `${error.status === 0 ? "no answer" : `status ${error.status}`}${error.notApi ? " (a web page instead of API data)" : ""}${body ? `: ${body}` : ""}`;
   }
   return error instanceof Error ? error.message : String(error);
+}
+
+/**
+ * The other known Zephyr address that accepts this token, when the chosen one rejects it: a token
+ * belongs to one region (or to Zephyr Essential) and the other addresses answer 401.
+ */
+export async function zephyrAddressOfToken(apiToken: string, tried: string): Promise<string | null> {
+  const others = ZEPHYR_REGIONS.map((region) => region.value).filter((value) => zephyrBase(value) !== zephyrBase(tried));
+  const answers = await Promise.all(
+    others.map(async (value) => {
+      try {
+        const response = await fetch(`${zephyrBase(value)}projects?maxResults=1`, { headers: { Authorization: `Bearer ${apiToken.trim()}`, Accept: "application/json" }, signal: AbortSignal.timeout(15_000) });
+        return response.ok ? value : null;
+      } catch {
+        return null;
+      }
+    }),
+  );
+  return answers.find((value) => value !== null) ?? null;
 }
 
 const notFound = (error: unknown) => error instanceof HttpError && error.status === 404;

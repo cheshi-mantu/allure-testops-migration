@@ -6,7 +6,7 @@ import { AlmClient } from "../alm/client.js";
 import { QaseClient } from "../qase/client.js";
 import { JiraClient } from "../jira/client.js";
 import { XrayClient } from "../xray/client.js";
-import { failureText, ZephyrClient } from "../zephyr/client.js";
+import { failureText, zephyrAddressOfToken, ZephyrClient } from "../zephyr/client.js";
 import { ZapiClient } from "../squad/client.js";
 
 export interface CheckResult extends ConnectionCheck {
@@ -210,10 +210,14 @@ export async function checkZephyr(profile: Profile): Promise<CheckResult> {
         .sort((a, b) => a.name.localeCompare(b.name)),
     );
   } catch (error) {
-    const hint =
-      error instanceof HttpError && error.status === 401
-        ? "Zephyr rejected the API access token. Check the token, and that the API address matches your Zephyr: Zephyr Essential tokens work with the Zephyr Essential address, tokens of Zephyr in the EU, Australia or Germany with the address of that region."
-        : explain(error, "Zephyr");
+    let hint = explain(error, "Zephyr");
+    if (error instanceof HttpError && error.status === 401) {
+      const address = await zephyrAddressOfToken(connection.apiToken, connection.endpoint);
+      trace(`Other Zephyr addresses: ${address ? `${address} accepts the token` : "none accepts the token"}.`);
+      hint = address
+        ? `Zephyr at ${connection.endpoint} rejected the API access token, and ${address} accepts it: choose this address in the Zephyr API field and check again.`
+        : "Zephyr rejected the API access token at every known Zephyr address. Check that the whole token was copied, that it was not revoked, and that it was created in this Jira site (profile menu, Zephyr API Access Tokens) after the Zephyr app was installed.";
+    }
     return result(false, `Jira works (as ${user}), but ${hint}`);
   }
 }

@@ -9,7 +9,7 @@
  *
  * ZEPHYR_URL is the API address of your Zephyr: the default region, eu., au. or de., or
  * https://prod-api.zephyr4jiracloud.com/v2 for Zephyr Essential. The token is created in Jira under
- * your profile menu, Zephyr API keys.
+ * your profile menu, Zephyr API Access Tokens.
  *
  * Besides hand-made edge cases it creates the scenarios of dev/xray-seed-scenarios.ts once each;
  * `--bulk N` adds N more test cases made from variations of them. Manual scenarios get steps,
@@ -35,7 +35,8 @@
  */
 import { fetch } from "undici";
 import { JiraClient } from "../packages/server/src/jira/client.js";
-import { ZephyrClient, failureText } from "../packages/server/src/zephyr/client.js";
+import { HttpError } from "../packages/server/src/http/httpClient.js";
+import { ZephyrClient, failureText, zephyrAddressOfToken } from "../packages/server/src/zephyr/client.js";
 import type { ZephyrFolder, ZephyrOption, ZephyrTestCase, ZephyrTestStep } from "../packages/server/src/zephyr/types.js";
 import { COMPONENTS, generate, SCENARIOS, type GeneratedTest, type PreconditionName, type StepTemplate } from "./xray-seed-scenarios.js";
 
@@ -163,7 +164,13 @@ const components = new Map<string, number>();
 const folderIds = new Map<string, number>();
 
 async function prepareProject() {
-  const project = await zephyr.project(projectKey!).catch((error: unknown) => fail(`Zephyr has no project ${projectKey}, or the token cannot read it: ${failureText(error)}`));
+  const project = await zephyr.project(projectKey!).catch(async (error: unknown) => {
+    const address = error instanceof HttpError && error.status === 401 ? await zephyrAddressOfToken(connection.apiToken, connection.endpoint) : null;
+    return fail(
+      `Zephyr has no project ${projectKey}, or the token cannot read it: ${failureText(error)}` +
+        (address ? `\nThe token works with ${address}: set ZEPHYR_URL=${address} and run again.` : error instanceof HttpError && error.status === 401 ? "\nNo known Zephyr address accepts the token: check that the whole token was copied and that it belongs to this Jira site." : ""),
+    );
+  });
   accountId = (await jira.myself()).accountId;
   log(`Project ${project.key} (Zephyr id ${project.id}).`);
   for (const name of COMPONENTS) {
@@ -288,7 +295,12 @@ async function testCase(input: CaseInput): Promise<string | null> {
   const key = created.key;
   log(`  ${key}: ${input.name}`);
   if (input.script) {
-    await attempt(`script of ${key}`, () => zephyr.http.json("POST", `testcases/${key}/testscript`, { body: input.script }));
+    const saved = await attempt(`script of ${key}`, () => zephyr.http.json("POST", `testcases/${key}/testscript`, { body: input.script }));
+    // A second scenario in one script (shared with the Xray seed) is not valid Gherkin for Zephyr.
+    const steps = input.script.text.split(/\n\s*(?:Feature|Scenario(?: Outline)?):.*\n/)[0]!;
+    if (saved === null && input.script.type === "bdd" && steps !== input.script.text) {
+      await attempt(`script of ${key} with the first scenario only`, () => zephyr.http.json("POST", `testcases/${key}/testscript`, { body: { ...input.script, text: steps } }));
+    }
   }
   if (input.steps?.length) {
     const items = input.steps.map((step) =>
@@ -416,7 +428,8 @@ async function seed() {
     labels: ["bdd"],
     script: {
       type: "bdd",
-      text: "Feature: Discounts\n  # comment line\n  Scenario Outline: Apply a code\n    Given a cart of <total>\n    When I apply <code>\n    Then I pay <price>\n\n    Examples:\n      | total | code   | price |\n      | 100   | TEN    | 90    |\n      | 50    | HALF   | 25    |",
+      // Zephyr keeps the steps only: a script with Feature or Scenario lines is "Invalid Gherkin script".
+      text: "# comment line\nGiven a cart of <total>\nWhen I apply <code>\nThen I pay <price>\n\nExamples:\n  | total | code   | price |\n  | 100   | TEN    | 90    |\n  | 50    | HALF   | 25    |",
     },
   });
   await testCase({

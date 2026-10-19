@@ -137,7 +137,7 @@ export const ZEPHYR_REGIONS = [
 export const ZephyrConnectionSchema = z.object({
   /** Zephyr REST API v2 address, see {@link ZEPHYR_REGIONS}. */
   endpoint: z.string().default("https://api.zephyrscale.smartbear.com/v2"),
-  /** Zephyr API access token (Jira, your profile menu, Zephyr API keys). */
+  /** Zephyr API access token (Jira, your profile menu, Zephyr API Access Tokens). */
   apiToken: z.string().default(""),
   /** Jira Cloud site, e.g. https://yourcompany.atlassian.net. */
   jiraUrl: z.string().default(""),

@@ -57,7 +57,7 @@ HOST=127.0.0.1 npm start
 
 - **TestRail**: the URL, a user email and an API key (*My Settings → API Keys*). The API must be enabled in *Administration → Site Settings → API*. Read access to the project is enough.
 - **Xray Cloud**: the Jira Cloud site, the email and an API token of an Atlassian account that can browse the project (*id.atlassian.com → Security → API tokens*), and an Xray API key: client id and client secret (*Jira → Apps → Xray → API Keys*).
-- **Zephyr**: the Jira Cloud site, the email and an API token of an Atlassian account that can browse the project, and a Zephyr API access token (*Jira, your profile menu → Zephyr API keys*).
+- **Zephyr**: the Jira Cloud site, the email and an API token of an Atlassian account that can browse the project, and a Zephyr API access token (*Jira, your profile menu → Zephyr API Access Tokens*).
 - **Zephyr Squad** (old experience): the Jira Cloud site, the email and an API token of an Atlassian account that can browse the project, and the Zephyr Squad API keys of the same user: access key and secret key (*Jira → Apps → Zephyr Squad → API keys*).
 - **Qase**: an API token (*your profile → API tokens*) of a user who can read the project.
 - **ALM**: the address of ALM and a user name and password, or an API key (client id and secret, ALM 12.60 and later), of a user who is a member of the project and can read its Test Plan.
