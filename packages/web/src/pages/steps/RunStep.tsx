@@ -25,7 +25,7 @@ import { api, errorText } from "../../api/client";
 import { useProfile } from "../../components/ProfileContext";
 import { FixButton, ProblemList } from "../../components/Problems";
 import { RunStatusBadge } from "../../components/RunStatusBadge";
-import { AlmNotVerified } from "./ConnectionsStep";
+import { AlmNotVerified, SquadNotVerified, ZephyrNotVerified } from "./ConnectionsStep";
 
 /** How the run's file, project or tag prefix differ from the profile now; empty when they match or are unknown. */
 function otherSettings(run: RunSummary, profile: Profile, currentFileName: string | null): string[] {
@@ -47,6 +47,13 @@ function otherSettings(run: RunSummary, profile: Profile, currentFileName: strin
         }
         if (profile.source === "alm") {
           return `${context.sourceLabel}, the profile now uses ALM project ${profile.alm.scope.domain || "?"} / ${profile.alm.scope.project || "?"}.`;
+        }
+        if (profile.source === "squad") {
+          const jql = profile.squad.scope.jql.trim();
+          return `${context.sourceLabel}, the profile now uses Zephyr Squad project ${profile.squad.scope.projectKey || "?"}${jql ? ` (${jql})` : ""}.`;
+        }
+        if (profile.source === "zephyr") {
+          return `${context.sourceLabel}, the profile now uses Zephyr project ${profile.zephyr.scope.projectKey || "?"}.`;
         }
         if (profile.source === "xray") {
           const jql = profile.xray.scope.jql.trim();
@@ -128,6 +135,32 @@ function problems(profile: Profile): string[] {
     }
     return list;
   }
+  if (profile.source === "squad") {
+    const connection = profile.squad.connection;
+    if (!connection.accessKey || !has(connection.secretKey) || !connection.jiraUrl || !connection.jiraEmail || !has(connection.jiraApiToken)) {
+      list.push("The Zephyr Squad and Jira connection is incomplete (Connections).");
+    }
+    if (!profile.squad.scope.projectKey || !profile.testops.scope.projectId) {
+      list.push("Choose both projects (Projects).");
+    }
+    if (profile.fields.length === 0) {
+      list.push("Review the field mapping (Fields).");
+    }
+    return list;
+  }
+  if (profile.source === "zephyr") {
+    const connection = profile.zephyr.connection;
+    if (!has(connection.apiToken) || !connection.jiraUrl || !connection.jiraEmail || !has(connection.jiraApiToken)) {
+      list.push("The Zephyr and Jira connection is incomplete (Connections).");
+    }
+    if (!profile.zephyr.scope.projectKey || !profile.testops.scope.projectId) {
+      list.push("Choose both projects (Projects).");
+    }
+    if (profile.fields.length === 0) {
+      list.push("Review the field mapping (Fields).");
+    }
+    return list;
+  }
   if (profile.source === "qase") {
     if (!has(profile.qase.connection.apiToken)) {
       list.push("The Qase connection is incomplete (Connections).");
@@ -178,12 +211,14 @@ function warnings(profile: Profile, sourceDepth: number | null): string[] {
     if (!profile.csv.withoutPath) {
       list.push("No section path column is chosen, so cases will not be grouped into sections.");
     }
-  } else if (profile.source === "xml" && sourceDepth === 0) {
-    // The cases of the file are not inside named elements: there is no structure to keep.
+  } else if ((profile.source === "xml" && sourceDepth === 0) || profile.source === "squad") {
+    // No structure to keep: the cases of the file are not inside named elements, Zephyr Squad tests have no folders.
   } else if (!profile.structure.levels.some(Boolean) && !profile.structure.suiteField) {
     list.push(
       profile.source === "xray"
         ? "No folder level is mapped, so the folders of the test repository will not be kept."
+        : profile.source === "zephyr" || profile.source === "alm"
+        ? "No folder level is mapped, so the folders will not be kept."
         : "No suite or section level is mapped, so the source structure will not be kept.",
     );
   }
@@ -286,6 +321,14 @@ export function RunStep() {
   return (
     <Stack>
       {profile.source === "alm" && <AlmNotVerified />}
+      {profile.source === "zephyr" && <ZephyrNotVerified />}
+      {profile.source === "squad" && <SquadNotVerified />}
+      {profile.source === "squad" && !profile.squad.detailedLog && (
+        <Alert color="blue">The detailed log is off (Connections). Turn it on before a run whose log you are going to send.</Alert>
+      )}
+      {profile.source === "zephyr" && !profile.zephyr.detailedLog && (
+        <Alert color="blue">The detailed log is off (Connections). Turn it on before a run whose log you are going to send.</Alert>
+      )}
       {profile.source === "alm" && !profile.alm.detailedLog && (
         <Alert color="blue">The detailed log is off (Connections). Turn it on before a run whose log you are going to send.</Alert>
       )}
@@ -456,7 +499,7 @@ export function RunStep() {
             {profile.source === "testops"
               ? `the target projects ${profile.testopsSource.projects.map((p) => `"${p.targetName}"`).join(", ")}; projects that do not exist yet are created.`
               : `Allure TestOps project #${profile.testops.scope.projectId}.`}{" "}
-            {profile.source === "testrail" ? "TestRail is only read." : profile.source === "xray" ? "Jira and Xray are only read." : profile.source === "qase" ? "Qase is only read." : profile.source === "alm" ? "ALM is only read." : profile.source === "testops" ? "The source Allure TestOps is only read." : "The file is not changed."}
+            {profile.source === "testrail" ? "TestRail is only read." : profile.source === "xray" ? "Jira and Xray are only read." : profile.source === "zephyr" ? "Zephyr and Jira are only read." : profile.source === "squad" ? "Jira and Zephyr Squad are only read." : profile.source === "qase" ? "Qase is only read." : profile.source === "alm" ? "ALM is only read." : profile.source === "testops" ? "The source Allure TestOps is only read." : "The file is not changed."}
           </Text>
           <Group justify="flex-end">
             <Button variant="default" onClick={() => setConfirm(false)}>

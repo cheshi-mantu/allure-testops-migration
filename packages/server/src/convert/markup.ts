@@ -221,6 +221,6 @@ export function tableToCsv(table: Table): string {
 export function splitTextSteps(text: string): string[] {
   return text
     .split("\n")
-    .map((line) => line.replace(/^\s*(?:\d+[.)]|[-*•])\s+/, "").trim())
+    .map((line) => line.replace(/^\s*(?:\d+\\?[.)]|\\?[-*•])\s+/, "").trim())
     .filter((line) => line !== "");
 }

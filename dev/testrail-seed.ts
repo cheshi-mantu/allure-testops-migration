@@ -20,7 +20,7 @@
  */
 import { HttpClient, HttpError } from "../packages/server/src/http/httpClient.js";
 import { sharedRateLimiter } from "../packages/server/src/http/rateLimiter.js";
-import { wikiToMarkdown } from "../packages/server/src/xray/wiki.js";
+import { wikiToMarkdown } from "../packages/server/src/jira/wiki.js";
 import { generate, random, SCENARIOS, type GeneratedTest, type PreconditionName, type StepTemplate } from "./xray-seed-scenarios.js";
 
 const MARKER = "Created by dev/testrail-seed.ts of allure-testops-migration.";

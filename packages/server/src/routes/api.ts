@@ -31,11 +31,15 @@ import { explain, KnownProblem, OperationFailed, serviceOf } from "../engine/pro
 import { HttpError } from "../http/httpClient.js";
 import { prepareSource } from "../engine/sources.js";
 import type { FileStore } from "../storage/fileStore.js";
-import { checkAlm, checkQase, checkTestOps, checkTestRail, checkXray } from "./checks.js";
+import { checkAlm, checkQase, checkSquad, checkTestOps, checkTestRail, checkXray, checkZephyr } from "./checks.js";
 import { discoverFromTestOps, fromTestOpsContext, readTestCase, sourceClient, wantedByType } from "../fromtestops/source.js";
 import { transformTestOpsCase } from "../fromtestops/transform.js";
 import { discoverAlm, folderChoices, loadAlmContext, parseAlmTestId, readAlmTest } from "../alm/discovery.js";
 import { transformAlmTest } from "../alm/transform.js";
+import { discoverZephyr, folderChoices as zephyrFolderChoices, loadZephyrContext, parseTestCaseKey, readZephyrCase } from "../zephyr/discovery.js";
+import { transformZephyrCase } from "../zephyr/transform.js";
+import { discoverSquad, loadSquadContext, readSquadCase } from "../squad/discovery.js";
+import { transformSquadCase } from "../squad/transform.js";
 import { discoverQase, loadQaseContext, parseQaseCaseId, readQaseCase } from "../qase/discovery.js";
 import { QaseClient } from "../qase/client.js";
 import { suitePath, transformQaseCase } from "../qase/transform.js";
@@ -124,6 +128,8 @@ export async function registerApi(app: FastifyInstance, deps: ApiDeps): Promise<
         xrayProject: profile.xray.scope.projectKey,
         qaseProject: profile.qase.scope.projectCode,
         almProject: profile.alm.scope.project ? `${profile.alm.scope.domain} / ${profile.alm.scope.project}` : "",
+        zephyrProject: profile.zephyr.scope.projectKey,
+        squadProject: profile.squad.scope.projectKey,
         testopsProjects: profile.testopsSource.projects.map((p) => p.sourceName),
         testopsEndpoint: profile.testops.connection.endpoint,
         lastRun: (await runs.list(profile.id))[0] ?? null,
@@ -212,6 +218,17 @@ export async function registerApi(app: FastifyInstance, deps: ApiDeps): Promise<
       await context.client.logout();
     }
   });
+  app.post<{ Params: { id: string } }>("/api/profiles/:id/squad/check", async (request) => checkSquad(await load(request.params.id)));
+  app.post<{ Params: { id: string } }>("/api/profiles/:id/zephyr/check", async (request) => checkZephyr(await load(request.params.id)));
+  /** Test case folders of the chosen Zephyr project with their full paths, to narrow a migration. */
+  app.get<{ Params: { id: string } }>("/api/profiles/:id/zephyr/folders", async (request) => {
+    const profile = await load(request.params.id);
+    if (!profile.zephyr.scope.projectKey) {
+      return [];
+    }
+    const context = await loadZephyrContext(profile);
+    return zephyrFolderChoices(context.folders);
+  });
   /** The source Allure TestOps: the same check as for the target, with the source connection. */
   app.post<{ Params: { id: string } }>("/api/profiles/:id/testops-source/check", async (request) => {
     const profile = await load(request.params.id);
@@ -278,6 +295,10 @@ export async function registerApi(app: FastifyInstance, deps: ApiDeps): Promise<
         return discoverQase(profile);
       case "alm":
         return discoverAlm(profile);
+      case "zephyr":
+        return discoverZephyr(profile);
+      case "squad":
+        return discoverSquad(profile);
       case "testops":
         return discoverFromTestOps(profile);
       default:
@@ -426,6 +447,42 @@ export async function registerApi(app: FastifyInstance, deps: ApiDeps): Promise<
       } finally {
         await context.client.logout();
       }
+    }
+    if (profile.source === "squad") {
+      const context = await loadSquadContext(profile);
+      const key = rawId.trim().toUpperCase();
+      const testCase = await readSquadCase(context, key);
+      if (!testCase) {
+        throw Object.assign(new Error(`${key} is not a Jira issue the user can see.`), { statusCode: 404 });
+      }
+      const { planned, linkedCaseIds } = transformSquadCase(testCase, context);
+      if (testCase.issue.key.split("-")[0] !== context.project.key) {
+        planned.notes.push({
+          code: "squad-other-project",
+          text: `${testCase.issue.key} belongs to another Jira project than the one chosen for migration.`,
+          hint: "Choose its project on the Projects step if it should be migrated.",
+          fix: { step: "scope" },
+        });
+      }
+      return { ...normalizePlanned(planned), linkedCaseIds };
+    }
+    if (profile.source === "zephyr") {
+      const context = await loadZephyrContext(profile);
+      const key = parseTestCaseKey(rawId);
+      const item = key === null ? null : await readZephyrCase(context, key);
+      if (!item) {
+        throw Object.assign(new Error(`"${rawId}" is not a Zephyr test case the API token can read. Test case keys look like ${context.project.key}-T12.`), { statusCode: 404 });
+      }
+      const { planned, linkedCaseIds } = transformZephyrCase(item, context);
+      if (item.testCase.key.replace(/-T\d+$/, "") !== context.project.key) {
+        planned.notes.push({
+          code: "zephyr-other-project",
+          text: `${item.testCase.key} belongs to another Jira project than the one chosen for migration.`,
+          hint: "Choose its project on the Projects step if it should be migrated.",
+          fix: { step: "scope" },
+        });
+      }
+      return { ...normalizePlanned(planned), linkedCaseIds };
     }
     if (profile.source === "xray") {
       const context = await loadXrayContext(profile);

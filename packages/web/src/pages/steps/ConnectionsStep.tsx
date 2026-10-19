@@ -2,7 +2,7 @@ import { Alert, Anchor, Autocomplete, Button, Card, Code, Collapse, CopyButton, 
 import { IconAlertCircle, IconCircleCheck } from "@tabler/icons-react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
-import { QASE_RATE_LIMITS, SECRET_MASK, TESTRAIL_RATE_LIMITS, XRAY_REGIONS, type AlmConnection, type QaseConnection, type TestRailConnection, type XmlFiles } from "@atm/shared";
+import { QASE_RATE_LIMITS, SECRET_MASK, TESTRAIL_RATE_LIMITS, XRAY_REGIONS, ZEPHYR_REGIONS, type AlmConnection, type QaseConnection, type TestRailConnection, type XmlFiles } from "@atm/shared";
 import { api, errorText, type CheckResult } from "../../api/client";
 import { useProfile } from "../../components/ProfileContext";
 
@@ -71,6 +71,8 @@ export function ConnectionsStep() {
       </Text>
       <SimpleGrid cols={{ base: 1, lg: profile.source === "csv" ? 1 : 2 }} maw={profile.source === "csv" ? 640 : undefined}>
         {profile.source === "xray" && <XrayConnectionCard />}
+        {profile.source === "zephyr" && <ZephyrConnectionCard />}
+        {profile.source === "squad" && <SquadConnectionCard />}
         {profile.source === "qase" && <QaseConnectionCard />}
         {profile.source === "alm" && <AlmConnectionCard />}
         {profile.source === "testops" && <TestOpsSourceCard />}
@@ -465,8 +467,6 @@ function AlmConnectionCard() {
     onSuccess: (result) => queryClient.setQueryData(["projects", "alm", profile.id], result.projects),
   });
   const set = <K extends keyof AlmConnection>(key: K, value: AlmConnection[K]) => update((p) => void (p.alm.connection[key] = value));
-  const [showDetails, setShowDetails] = useState(false);
-  const details = check.data?.details;
 
   return (
     <Card withBorder>
@@ -530,31 +530,37 @@ function AlmConnectionCard() {
           </Button>
         </Group>
         <CheckAlert result={check.data} error={check.error} />
-        {details && (
-          <Stack gap="xs">
-            <Group gap="xs">
-              <Anchor component="button" type="button" size="sm" onClick={() => setShowDetails((v) => !v)}>
-                {showDetails ? "Hide" : "Show"} the detailed log of this check
-              </Anchor>
-              <CopyButton value={details}>
-                {({ copied, copy }) => (
-                  <Button size="compact-xs" variant="default" onClick={copy}>
-                    {copied ? "Copied" : "Copy"}
-                  </Button>
-                )}
-              </CopyButton>
-            </Group>
-            <Collapse expanded={showDetails}>
-              <ScrollArea.Autosize mah={260} type="auto">
-                <Code block fz="xs">
-                  {details}
-                </Code>
-              </ScrollArea.Autosize>
-            </Collapse>
-          </Stack>
-        )}
+        {check.data?.details && <CheckDetails details={check.data.details} />}
       </Stack>
     </Card>
+  );
+}
+
+/** The detailed log of a connection check, to read or copy and send. */
+function CheckDetails({ details }: { details: string }) {
+  const [shown, setShown] = useState(false);
+  return (
+    <Stack gap="xs">
+      <Group gap="xs">
+        <Anchor component="button" type="button" size="sm" onClick={() => setShown((v) => !v)}>
+          {shown ? "Hide" : "Show"} the detailed log of this check
+        </Anchor>
+        <CopyButton value={details}>
+          {({ copied, copy }) => (
+            <Button size="compact-xs" variant="default" onClick={copy}>
+              {copied ? "Copied" : "Copy"}
+            </Button>
+          )}
+        </CopyButton>
+      </Group>
+      <Collapse expanded={shown}>
+        <ScrollArea.Autosize mah={260} type="auto">
+          <Code block fz="xs">
+            {details}
+          </Code>
+        </ScrollArea.Autosize>
+      </Collapse>
+    </Stack>
   );
 }
 
@@ -566,6 +572,194 @@ export function AlmNotVerified() {
       migration. If something fails or looks wrong, keep <i>Detailed log</i> on, download the log of the run (Run step, <i>Download log</i>) or copy the log of the connection check, and send it with a
       description of the problem: it holds no passwords or secrets, and no text of the tests.
     </Alert>
+  );
+}
+
+/** The Zephyr migration is built from the public REST API reference and a simulated Zephyr only. */
+export function ZephyrNotVerified() {
+  return (
+    <Alert color="yellow" title="Not yet verified on a real Zephyr">
+      The Zephyr migration is built from the public Zephyr REST API reference and tested against a simulated Zephyr only. Check the connection, look at a few test cases on the Preview step and do a dry
+      run before the migration. If something fails or looks wrong, keep <i>Detailed log</i> on, download the log of the run (Run step, <i>Download log</i>) or copy the log of the connection check, and
+      send it with a description of the problem: it holds no tokens, and no text of the test cases.
+    </Alert>
+  );
+}
+
+/** Zephyr API access token for the test cases, Jira account for issues, users and components: both are needed. */
+function ZephyrConnectionCard() {
+  const { profile, update, flush } = useProfile();
+  const queryClient = useQueryClient();
+  const zc = profile.zephyr.connection;
+  const check = useMutation({
+    mutationFn: async () => {
+      await flush();
+      return api.checkZephyr(profile.id);
+    },
+    onSuccess: (result) => queryClient.setQueryData(["projects", "zephyr", profile.id], result.projects),
+  });
+  const set = <K extends keyof typeof zc>(key: K, value: (typeof zc)[K]) => update((p) => void (p.zephyr.connection[key] = value));
+
+  return (
+    <Card withBorder>
+      <Stack>
+        <Title order={4}>Zephyr and Jira (source)</Title>
+        <ZephyrNotVerified />
+        <Text size="sm" c="dimmed">
+          For Zephyr (formerly Zephyr Scale) and Zephyr Essential, where test cases have keys such as CALC-T12. Zephyr keeps the test cases (folders, steps, scripts, statuses, custom fields, files), Jira
+          knows the issues they cover, the users and the components. The migration reads both. The old Zephyr Squad, where tests are Jira issues, is a different source.
+        </Text>
+        <TextInput label="Jira site" placeholder="https://yourcompany.atlassian.net" value={zc.jiraUrl} onChange={(e) => set("jiraUrl", e.currentTarget.value)} />
+        <SimpleGrid cols={{ base: 1, sm: 2 }}>
+          <TextInput label="Jira user email" value={zc.jiraEmail} onChange={(e) => set("jiraEmail", e.currentTarget.value)} />
+          <PasswordInput
+            label="Atlassian API token"
+            description={
+              <>
+                Create one at <i>id.atlassian.com → Security → API tokens</i>.
+              </>
+            }
+            placeholder={secretPlaceholder(zc.jiraApiToken)}
+            value={secretValue(zc.jiraApiToken)}
+            onChange={(e) => set("jiraApiToken", e.currentTarget.value)}
+          />
+        </SimpleGrid>
+        <Autocomplete
+          label="Zephyr API address"
+          description={`${ZEPHYR_REGIONS.find((r) => r.value === zc.endpoint.replace(/\/+$/, ""))?.label ?? "Custom address"}. Zephyr Essential has its own address; Zephyr with data residency uses the address of its region.`}
+          data={ZEPHYR_REGIONS.map((r) => r.value)}
+          value={zc.endpoint}
+          onChange={(value) => set("endpoint", value.trim())}
+        />
+        <PasswordInput
+          label="Zephyr API access token"
+          description={
+            <>
+              In Jira, open your profile menu and choose <i>Zephyr API keys</i>. The token reads what its user can see.
+            </>
+          }
+          placeholder={secretPlaceholder(zc.apiToken)}
+          value={secretValue(zc.apiToken)}
+          onChange={(e) => set("apiToken", e.currentTarget.value)}
+        />
+        <NumberInput
+          label="Requests per minute to Zephyr"
+          description="Zephyr does not publish its limits. The tool stays below this number and waits as long as Zephyr asks when it answers 429. Lower it if runs keep waiting."
+          min={10}
+          max={6000}
+          value={zc.requestsPerMinute}
+          onChange={(value) => typeof value === "number" && set("requestsPerMinute", value)}
+        />
+        <Switch
+          label="Detailed log"
+          description="Every request to Zephyr with its answer status and time, the structure of the answers (field names and kinds of values, file names, not the text of test cases) and what was read for each test case go to the log of the connection check and of every run. Tokens are never written."
+          checked={profile.zephyr.detailedLog}
+          onChange={(e) => {
+            const checked = e.currentTarget.checked;
+            update((p) => void (p.zephyr.detailedLog = checked));
+          }}
+        />
+        <Group>
+          <Button variant="light" loading={check.isPending} onClick={() => check.mutate()}>
+            Test connection
+          </Button>
+        </Group>
+        <CheckAlert result={check.data} error={check.error} />
+        {check.data?.details && <CheckDetails details={check.data.details} />}
+      </Stack>
+    </Card>
+  );
+}
+
+/** The Zephyr Squad migration is built from the public API reference and a simulated Zephyr Squad only. */
+export function SquadNotVerified() {
+  return (
+    <Alert color="yellow" title="Not yet verified on a real Zephyr Squad">
+      The Zephyr Squad migration is built from the public Zephyr Squad API reference and tested against a simulated Zephyr Squad only. Check the connection, look at a few tests on the Preview step and do a
+      dry run before the migration. If something fails or looks wrong, keep <i>Detailed log</i> on, download the log of the run (Run step, <i>Download log</i>) or copy the log of the connection check, and
+      send it with a description of the problem: it holds no keys or tokens, and no text of the tests.
+    </Alert>
+  );
+}
+
+/** Zephyr Squad API keys for the steps, Jira account for the issues: both are needed, and they must belong to the same user. */
+function SquadConnectionCard() {
+  const { profile, update, flush } = useProfile();
+  const queryClient = useQueryClient();
+  const sc = profile.squad.connection;
+  const check = useMutation({
+    mutationFn: async () => {
+      await flush();
+      return api.checkSquad(profile.id);
+    },
+    onSuccess: (result) => queryClient.setQueryData(["projects", "squad", profile.id], result.projects),
+  });
+  const set = <K extends keyof typeof sc>(key: K, value: (typeof sc)[K]) => update((p) => void (p.squad.connection[key] = value));
+
+  return (
+    <Card withBorder>
+      <Stack>
+        <Title order={4}>Zephyr Squad and Jira (source)</Title>
+        <SquadNotVerified />
+        <Text size="sm" c="dimmed">
+          For the old Zephyr Squad, where tests are Jira issues of type Test (Jira may call the app Zephyr Essential already). Jira keeps the issue (summary, description, fields, comments, links,
+          attachments), the Zephyr Squad API keeps the steps. If test cases have keys such as CALC-T12, the project uses the new Zephyr: create a Zephyr profile instead.
+        </Text>
+        <TextInput label="Jira site" placeholder="https://yourcompany.atlassian.net" value={sc.jiraUrl} onChange={(e) => set("jiraUrl", e.currentTarget.value)} />
+        <SimpleGrid cols={{ base: 1, sm: 2 }}>
+          <TextInput label="Jira user email" description="The user the Zephyr Squad API keys belong to." value={sc.jiraEmail} onChange={(e) => set("jiraEmail", e.currentTarget.value)} />
+          <PasswordInput
+            label="Atlassian API token"
+            description={
+              <>
+                Create one at <i>id.atlassian.com → Security → API tokens</i>.
+              </>
+            }
+            placeholder={secretPlaceholder(sc.jiraApiToken)}
+            value={secretValue(sc.jiraApiToken)}
+            onChange={(e) => set("jiraApiToken", e.currentTarget.value)}
+          />
+        </SimpleGrid>
+        <SimpleGrid cols={{ base: 1, sm: 2 }}>
+          <TextInput
+            label="Zephyr Squad access key"
+            description={
+              <>
+                Jira <i>Apps → Zephyr Squad → API keys</i>, generated by the user above.
+              </>
+            }
+            value={sc.accessKey}
+            onChange={(e) => set("accessKey", e.currentTarget.value.trim())}
+          />
+          <PasswordInput label="Zephyr Squad secret key" placeholder={secretPlaceholder(sc.secretKey)} value={secretValue(sc.secretKey)} onChange={(e) => set("secretKey", e.currentTarget.value)} />
+        </SimpleGrid>
+        <TextInput label="Zephyr Squad API address" description="Leave as it is unless SmartBear support gave you another one." value={sc.endpoint} onChange={(e) => set("endpoint", e.currentTarget.value.trim())} />
+        <NumberInput
+          label="Requests per minute to Zephyr Squad"
+          description="Zephyr Squad limits requests per user without publishing the number. The tool stays below this number and waits as long as Zephyr Squad asks when it answers 429."
+          min={10}
+          max={6000}
+          value={sc.requestsPerMinute}
+          onChange={(value) => typeof value === "number" && set("requestsPerMinute", value)}
+        />
+        <Switch
+          label="Detailed log"
+          description="Every request to Zephyr Squad with its answer status and time, the structure of the answers (field names and kinds of values, file names, not the text of tests) and what was read for each test go to the log of the connection check and of every run. Keys and tokens are never written."
+          checked={profile.squad.detailedLog}
+          onChange={(e) => {
+            const checked = e.currentTarget.checked;
+            update((p) => void (p.squad.detailedLog = checked));
+          }}
+        />
+        <Group>
+          <Button variant="light" loading={check.isPending} onClick={() => check.mutate()}>
+            Test connection
+          </Button>
+        </Group>
+        <CheckAlert result={check.data} error={check.error} />
+        {check.data?.details && <CheckDetails details={check.data.details} />}
+      </Stack>
+    </Card>
   );
 }
 

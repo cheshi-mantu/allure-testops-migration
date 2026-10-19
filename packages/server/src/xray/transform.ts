@@ -4,10 +4,12 @@ import { note } from "../convert/notes.js";
 import { examplesSink, type ExamplesSink } from "../convert/examples.js";
 import { buildStep, inlineAttachment, textSteps } from "../convert/steps.js";
 import { migrationTag } from "../convert/transform.js";
-import { folderLevels, XrayCatalog } from "./catalog.js";
+import { JiraCatalog, mappedJiraValues } from "../jira/catalog.js";
+import { folderLevels } from "./catalog.js";
+import type { XrayCatalog } from "./catalog.js";
 import { NESTED_LIMIT } from "./client.js";
 import type { XrayCase, XrayStep } from "./types.js";
-import { wikiToMarkdown, wikiToPlain, wikiToStepText } from "./wiki.js";
+import { wikiToMarkdown, wikiToPlain, wikiToStepText } from "../jira/wiki.js";
 
 export interface XrayContext {
   profile: Profile;
@@ -34,37 +36,6 @@ function isUrl(value: string): boolean {
 
 const ISSUE_KEY = /^[A-Z][A-Z0-9_]*-\d+$/;
 
-/** Values of a field after applying the value mapping. */
-export function mappedXrayValues(testCase: XrayCase, mapping: FieldMapping, catalog: XrayCatalog, ownerDefault = false): string[] {
-  const field = catalog.get(mapping.source);
-  const value = catalog.value(testCase, mapping.source);
-  const result: string[] = [];
-  const push = (item: string | null | undefined) => {
-    const trimmed = item?.trim();
-    if (trimmed && !result.includes(trimmed)) {
-      result.push(trimmed);
-    }
-  };
-  if (field?.closed) {
-    value.ids.forEach((id, index) => {
-      if (Object.hasOwn(mapping.values, id)) {
-        push(mapping.values[id]);
-      } else if (ownerDefault && field.kind === "user") {
-        push(value.emails?.get(id) ?? value.labels[index]);
-      } else {
-        push(value.labels[index]);
-      }
-    });
-    return result;
-  }
-  for (const label of value.labels) {
-    for (const part of splitValue(label, mapping.separator)) {
-      const key = part.trim();
-      push(Object.hasOwn(mapping.values, key) ? mapping.values[key] : key);
-    }
-  }
-  return result;
-}
 
 function stepAttachments(step: XrayStep): PlannedAttachment[] {
   return (step.attachments ?? []).map((a) => ({ sourceId: `${XRAY_ATTACHMENT_PREFIX}${a.id}`, fileName: a.filename }));
@@ -174,7 +145,7 @@ export function transformXrayCase(testCase: XrayCase, context: XrayContext): Xra
     planned.customFields[name] = [...existing, ...values.filter((v) => !existing.includes(v))];
   };
   const withImages = (markdown: string) => {
-    XrayCatalog.imageIds(markdown).forEach((id) => inlineIds.add(id));
+    JiraCatalog.imageIds(markdown).forEach((id) => inlineIds.add(id));
     return markdown;
   };
 
@@ -191,7 +162,7 @@ export function transformXrayCase(testCase: XrayCase, context: XrayContext): Xra
     const target = mapping.target;
     const field = catalog.get(mapping.source);
     const label = field?.label ?? mapping.source;
-    const values = () => mappedXrayValues(testCase, mapping, catalog);
+    const values = () => mappedJiraValues(testCase, mapping, catalog);
     switch (target.kind) {
       case "ignore":
       case "name":
@@ -212,7 +183,7 @@ export function transformXrayCase(testCase: XrayCase, context: XrayContext): Xra
         planned.status ??= values()[0] ?? null;
         break;
       case "owner":
-        planned.owner ??= mappedXrayValues(testCase, mapping, catalog, true)[0] ?? null;
+        planned.owner ??= mappedJiraValues(testCase, mapping, catalog, true)[0] ?? null;
         break;
       case "role":
         if (!target.role) {
@@ -227,7 +198,7 @@ export function transformXrayCase(testCase: XrayCase, context: XrayContext): Xra
           }
           break;
         }
-        for (const name of mappedXrayValues(testCase, mapping, catalog, true)) {
+        for (const name of mappedJiraValues(testCase, mapping, catalog, true)) {
           if (!planned.members.some((m) => m.name === name && m.role === target.role)) {
             planned.members.push({ name, role: target.role });
           }

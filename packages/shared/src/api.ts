@@ -86,7 +86,7 @@ export interface SuiteStructure {
 
 /** What the mapping screens show about the source: structure, fields and sample cases. */
 export interface SourceDiscovery {
-  source: "testrail" | "csv" | "xray" | "xml" | "qase" | "alm" | "testops";
+  source: "testrail" | "csv" | "xray" | "zephyr" | "squad" | "xml" | "qase" | "alm" | "testops";
   project: NamedId & { suiteMode: number };
   suites: NamedId[];
   structure: SuiteStructure[];
@@ -353,7 +353,7 @@ export interface RunLogEntry {
 export interface ProfileListItem {
   id: string;
   name: string;
-  source: "testrail" | "csv" | "xray" | "xml" | "qase" | "alm" | "testops";
+  source: "testrail" | "csv" | "xray" | "zephyr" | "squad" | "xml" | "qase" | "alm" | "testops";
   /** CSV and XML: name of the chosen file. */
   fileName: string | null;
   updatedAt: string;
@@ -364,6 +364,8 @@ export interface ProfileListItem {
   qaseProject?: string;
   /** ALM: domain and project, e.g. DEFAULT / Banking. */
   almProject?: string;
+  zephyrProject?: string;
+  squadProject?: string;
   /** Allure TestOps source: names of the chosen projects. */
   testopsProjects?: string[];
   testopsEndpoint: string;

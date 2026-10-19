@@ -1,8 +1,10 @@
 import type { CaseAttachments, SourceAssets } from "../engine/assets.js";
 import { contentTypeFor, safeFileName, type DownloadedAttachment } from "../engine/attachments.js";
-import type { JiraClient, XrayClient } from "./client.js";
+import type { JiraClient } from "../jira/client.js";
+import type { JiraAttachment } from "../jira/types.js";
+import type { XrayClient } from "./client.js";
 import { calledTestContent, XRAY_ATTACHMENT_PREFIX, type XrayContext } from "./transform.js";
-import type { JiraAttachment, XrayAttachment, XrayCase } from "./types.js";
+import type { XrayAttachment, XrayCase } from "./types.js";
 
 /**
  * Attachments of Xray tests: files of the Jira issue (inline images and the rest), and step files

@@ -14,7 +14,7 @@ export function DiscoveryGate({ children, needTestOps = true }: { children: Reac
   const { profile, source: testrail, testops, refreshDiscovery } = useProfile();
   const started = useRef(false);
   const sourceReady =
-    profile.source === "csv" ? Boolean(profile.csv.fileId) : profile.source === "xml" ? Boolean(profile.xml.fileId) : profile.source === "qase" ? Boolean(profile.qase.scope.projectCode) : profile.source === "alm" ? Boolean(profile.alm.scope.domain && profile.alm.scope.project) : profile.source === "testops" ? profile.testopsSource.projects.length > 0 : profile.source === "xray" ? Boolean(profile.xray.scope.projectKey) : Boolean(profile.testrail.scope.projectId);
+    profile.source === "csv" ? Boolean(profile.csv.fileId) : profile.source === "xml" ? Boolean(profile.xml.fileId) : profile.source === "qase" ? Boolean(profile.qase.scope.projectCode) : profile.source === "alm" ? Boolean(profile.alm.scope.domain && profile.alm.scope.project) : profile.source === "testops" ? profile.testopsSource.projects.length > 0 : profile.source === "xray" ? Boolean(profile.xray.scope.projectKey) : profile.source === "zephyr" ? Boolean(profile.zephyr.scope.projectKey) : profile.source === "squad" ? Boolean(profile.squad.scope.projectKey) : Boolean(profile.testrail.scope.projectId);
   const ready = sourceReady && (!needTestOps || Boolean(profile.testops.scope.projectId));
 
   useEffect(() => {
@@ -32,7 +32,7 @@ export function DiscoveryGate({ children, needTestOps = true }: { children: Reac
   }, [ready, needTestOps, testrail.data, testrail.isFetching, testops.data, testops.isFetching, refreshDiscovery]);
 
   if (!ready) {
-    const what = profile.source === "csv" ? "the CSV file" : profile.source === "xml" ? "the XML file" : profile.source === "qase" ? "the Qase project" : profile.source === "alm" ? "the ALM project" : profile.source === "testops" ? "the projects of the source Allure TestOps" : profile.source === "xray" ? "the Jira project" : "the TestRail project";
+    const what = profile.source === "csv" ? "the CSV file" : profile.source === "xml" ? "the XML file" : profile.source === "qase" ? "the Qase project" : profile.source === "alm" ? "the ALM project" : profile.source === "testops" ? "the projects of the source Allure TestOps" : profile.source === "xray" || profile.source === "zephyr" || profile.source === "squad" ? "the Jira project" : "the TestRail project";
     return <Alert color="yellow">Choose {what}{needTestOps ? " and the Allure TestOps project" : ""} first.</Alert>;
   }
   const loading = testrail.isFetching || (needTestOps && testops.isFetching);
@@ -52,6 +52,10 @@ export function DiscoveryGate({ children, needTestOps = true }: { children: Reac
               ? "Reading sample cases from the source Allure TestOps…"
               : profile.source === "xray"
               ? "Reading Jira fields and sample tests from Jira and Xray…"
+              : profile.source === "zephyr"
+              ? "Reading folders and sample test cases from Zephyr and Jira…"
+              : profile.source === "squad"
+              ? "Reading Jira fields, sample tests and their steps from Jira and Zephyr Squad…"
               : "Reading projects, suites, sections, fields and sample cases…"}
         </Text>
       </Group>
@@ -99,7 +103,7 @@ export function RefreshButton() {
       loading={source.isFetching || testops.isFetching}
       onClick={() => void refreshDiscovery()}
     >
-      Reload from {isFileSource(profile.source) ? "the file and" : profile.source === "xray" ? "Jira, Xray and" : profile.source === "qase" ? "Qase and" : profile.source === "alm" ? "ALM and" : profile.source === "testops" ? "the source and the target" : "TestRail and"} Allure TestOps
+      Reload from {isFileSource(profile.source) ? "the file and" : profile.source === "xray" ? "Jira, Xray and" : profile.source === "zephyr" ? "Zephyr, Jira and" : profile.source === "squad" ? "Jira, Zephyr Squad and" : profile.source === "qase" ? "Qase and" : profile.source === "alm" ? "ALM and" : profile.source === "testops" ? "the source and the target" : "TestRail and"} Allure TestOps
     </Button>
   );
 }

@@ -64,6 +64,8 @@ export const api = {
   checkXray: (id: string) => request<CheckResult>("POST", `/api/profiles/${id}/xray/check`),
   checkQase: (id: string) => request<CheckResult>("POST", `/api/profiles/${id}/qase/check`),
   checkAlm: (id: string) => request<CheckResult>("POST", `/api/profiles/${id}/alm/check`),
+  checkSquad: (id: string) => request<CheckResult>("POST", `/api/profiles/${id}/squad/check`),
+  checkZephyr: (id: string) => request<CheckResult>("POST", `/api/profiles/${id}/zephyr/check`),
   checkTestOpsSource: (id: string) => request<CheckResult>("POST", `/api/profiles/${id}/testops-source/check`),
   testOpsSourceIntegrations: (id: string) =>
     request<{
@@ -72,6 +74,7 @@ export const api = {
     }>("GET", `/api/profiles/${id}/testops-source/integrations`),
   qaseSuites: (id: string) => request<NamedId[]>("GET", `/api/profiles/${id}/qase/suites`),
   almFolders: (id: string) => request<NamedId[]>("GET", `/api/profiles/${id}/alm/folders`),
+  zephyrFolders: (id: string) => request<NamedId[]>("GET", `/api/profiles/${id}/zephyr/folders`),
   checkXmlFiles: (id: string) => request<ConnectionCheck>("POST", `/api/profiles/${id}/xml/files/check`),
   testRailSuites: (id: string) => request<{ suiteMode: number; suites: NamedId[] }>("GET", `/api/profiles/${id}/testrail/suites`),
   discoverSource: (id: string) => request<SourceDiscovery>("POST", `/api/profiles/${id}/source/discover`),

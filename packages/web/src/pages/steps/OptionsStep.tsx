@@ -21,6 +21,12 @@ export function OptionsStep() {
   const xray = profile.source === "xray";
   const qase = profile.source === "qase";
   const alm = profile.source === "alm";
+  const zephyr = profile.source === "zephyr";
+  const squad = profile.source === "squad";
+  /** Tests kept as Jira issues. */
+  const jiraIssues = xray || squad;
+  /** Sources whose cases have a key worth keeping as an Allure TestOps test key. */
+  const keyed = jiraIssues || zephyr;
   const testrail = profile.source === "testrail";
   /** Another Allure TestOps: text is Markdown on both sides and moves as it is. */
   const copy = profile.source === "testops";
@@ -45,33 +51,35 @@ export function OptionsStep() {
                   ? `Every case gets the tag "${prefixShown}:<test id>", e.g. "${prefixShown}:1024". Reruns find cases by this tag and update them.`
                   : qase
                   ? `Every case gets the tag "${prefixShown}:<project code>-<case id>", e.g. "${prefixShown}:demo-12". Reruns find cases by this tag and update them.`
-                  : xray
+                  : zephyr
+                  ? `Every case gets the tag "${prefixShown}:<test case key>", e.g. "${prefixShown}:calc-t12". Reruns find cases by this tag and update them.`
+                  : jiraIssues
                   ? `Every case gets the tag "${prefixShown}:<issue key>", e.g. "${prefixShown}:calc-12". Reruns find cases by this tag and update them.`
                   : `Every case gets the tag "${prefixShown}:<TestRail id>". Reruns find cases by this tag and update them. Keep "testrail" to continue a migration made with the previous migration tool.`
             }
-            placeholder={xml ? "e.g. xml-regression" : csv ? "e.g. csv-regression" : xray ? "xray" : qase ? "qase" : alm ? "alm" : copy ? "old_id" : "testrail"}
+            placeholder={xml ? "e.g. xml-regression" : csv ? "e.g. csv-regression" : xray ? "xray" : squad ? "squad" : zephyr ? "zephyr" : qase ? "qase" : alm ? "alm" : copy ? "old_id" : "testrail"}
             value={options.migrationTagPrefix}
             error={prefixMissing ? "Enter a prefix. Without it migrated cases cannot be found again, so the migration cannot start." : undefined}
             onChange={(e) => set("migrationTagPrefix", e.currentTarget.value.trim())}
           />
           <TextInput
             label="Additional tag"
-            description={`Optional tag added to every migrated case, e.g. “from-${xray ? "xray" : qase ? "qase" : alm ? "alm" : xml ? "xml" : csv ? "csv" : "testrail"}”.`}
+            description={`Optional tag added to every migrated case, e.g. “from-${xray ? "xray" : squad ? "squad" : zephyr ? "zephyr" : qase ? "qase" : alm ? "alm" : xml ? "xml" : csv ? "csv" : "testrail"}”.`}
             value={options.additionalTag}
             onChange={(e) => set("additionalTag", e.currentTarget.value)}
           />
           {!csv && !alm && (
           <Switch
-            label={xray ? "Link back to the Jira issue" : qase ? "Link back to the Qase case" : copy ? "Link back to the case in the source Allure TestOps" : "Link back to the TestRail case"}
-            description={xray ? "A link named after the issue key, e.g. \"Jira CALC-12\", in the Links of the case." : qase ? "A link named after the case, e.g. \"Qase DEMO-12\", in the Links of the case." : undefined}
+            label={jiraIssues ? "Link back to the Jira issue" : zephyr ? "Link back to the Zephyr test case" : qase ? "Link back to the Qase case" : copy ? "Link back to the case in the source Allure TestOps" : "Link back to the TestRail case"}
+            description={jiraIssues ? "A link named after the issue key, e.g. \"Jira CALC-12\", in the Links of the case." : zephyr ? "A link named after the key, e.g. \"Zephyr CALC-T12\", to the Zephyr page of the Jira project. Off by default: the address of that page is not verified on a real Zephyr yet." : qase ? "A link named after the case, e.g. \"Qase DEMO-12\", in the Links of the case." : undefined}
             checked={options.selfLink}
             onChange={(e) => set("selfLink", e.currentTarget.checked)}
           />
           )}
-          {xray && (
+          {keyed && (
             <Select
-              label="Issue key as a test key"
-              description="Writes the issue key, e.g. CALC-12, to the Test keys of the case through an integration of the Allure TestOps project, such as Xray or Jira."
+              label={zephyr ? "Test case key as a test key" : "Issue key as a test key"}
+              description={zephyr ? "Writes the test case key, e.g. CALC-T12, to the Test keys of the case through an integration of the Allure TestOps project." : "Writes the issue key, e.g. CALC-12, to the Test keys of the case through an integration of the Allure TestOps project, such as Xray or Jira."}
               placeholder={testops.isFetching ? "Loading integrations…" : "Do not add a test key"}
               clearable
               data={[
@@ -84,10 +92,10 @@ export function OptionsStep() {
               onChange={(value) => set("testKeyIntegrationId", value ? Number(value) : null)}
             />
           )}
-          {xray && chosenIntegration && testops.data && !integrations.some((i) => i.id === chosenIntegration) && (
+          {keyed && chosenIntegration && testops.data && !integrations.some((i) => i.id === chosenIntegration) && (
             <Alert color="red">This integration is not enabled in the Allure TestOps project any more. Choose another one or clear the field.</Alert>
           )}
-          {xray && projectChosen && testops.data && integrations.length === 0 && (
+          {keyed && projectChosen && testops.data && integrations.length === 0 && (
             <Text size="xs" c="dimmed">
               The Allure TestOps project has no enabled integration. Add one in the project settings (Integrations) to write test keys.
             </Text>
@@ -103,7 +111,7 @@ export function OptionsStep() {
               Text is Markdown in both Allure TestOps instances and is copied as it is; images in text point to the copied files.
             </Text>
           )}
-          {!xray && !copy && !alm && (
+          {!jiraIssues && !copy && !alm && !zephyr && (
           <Radio.Group
             label={csv ? "Text format" : qase ? "Qase text format" : "TestRail text format"}
             description={xml ? "Text in the file may be Markdown or HTML." : csv ? "Text cells may hold Markdown or HTML." : qase ? "Qase keeps text as Markdown; text written in an older editor may be HTML." : "Newer TestRail versions store HTML; older ones use Markdown."}
@@ -122,6 +130,16 @@ export function OptionsStep() {
               ALM rich text is converted to Markdown; pictures in it, kept by ALM as attachments of the test or step, become attachments of the case. Test parameters such as &lt;&lt;&lt;amount&gt;&gt;&gt; stay in the text as they are.
             </Text>
           )}
+          {zephyr && (
+            <Text size="sm" c="dimmed">
+              Zephyr rich text is converted to Markdown; pictures that are files of the test case or its steps become attachments of the case. Values of a call to another test case replace its {"{name}"} placeholders.
+            </Text>
+          )}
+          {squad && (
+            <Text size="sm" c="dimmed">
+              Jira rich text and the wiki markup of Zephyr Squad steps are converted to Markdown; images in Jira text become attachments of the case.
+            </Text>
+          )}
           {xray && (
             <Text size="sm" c="dimmed">
               Jira rich text and Xray wiki markup are converted to Markdown; images in Jira text become attachments of the case.
@@ -129,7 +147,7 @@ export function OptionsStep() {
           )}
           {!csv && !copy && (
           <Radio.Group
-            label={xray ? "Generic definitions and other text mapped to the scenario" : "Steps written as plain text"}
+            label={xray ? "Generic definitions and other text mapped to the scenario" : squad ? "Jira text mapped to the scenario" : zephyr ? "Plain text scripts and other text mapped to the scenario" : "Steps written as plain text"}
             value={options.textSteps}
             onChange={(value) => set("textSteps", value as MigrationOptions["textSteps"])}
           >
@@ -172,20 +190,24 @@ export function OptionsStep() {
           <Title order={4}>Content</Title>
           <Switch
             label="Migrate attachments"
-            description={xray ? "Attachments of the Jira issue, images inside its text and files of Xray steps." : alm ? "Attachments of the tests and of their design steps, and pictures inside text. Attachments that are addresses become links." : copy ? "Every file of the cases and of the shared steps." : qase ? "Files of the cases and of their steps, and images inside text that Qase keeps." : "Case attachments and images inside text and steps."}
+            description={xray ? "Attachments of the Jira issue, images inside its text and files of Xray steps." : squad ? "Attachments of the Jira issue, images inside its text and files of Zephyr Squad steps." : zephyr ? "Files of the test cases and of their steps, and pictures inside text." : alm ? "Attachments of the tests and of their design steps, and pictures inside text. Attachments that are addresses become links." : copy ? "Every file of the cases and of the shared steps." : qase ? "Files of the cases and of their steps, and images inside text that Qase keeps." : "Case attachments and images inside text and steps."}
             checked={options.migrateAttachments}
             onChange={(e) => set("migrateAttachments", e.currentTarget.checked)}
           />
+          {!squad && (
           <Switch
-            label={xray || alm ? "Called tests become shared steps" : "Migrate shared steps"}
+            label={xray || alm ? "Called tests become shared steps" : zephyr ? "Called test cases become shared steps" : "Migrate shared steps"}
             description={
-              xray || alm
+              zephyr
+                ? "A step that calls another test case becomes an Allure TestOps shared step with its steps. A call with parameter values, and every call when this is off, gets the steps copied in with the values."
+                : xray || alm
                 ? "A step that calls another test becomes an Allure TestOps shared step with the called test's steps. When off, those steps are copied into each case."
                 : `${qase ? "Qase" : copy ? "Source" : "TestRail"} shared steps become Allure TestOps shared steps. When off, their steps are copied into each case.`
             }
             checked={options.migrateSharedSteps}
             onChange={(e) => set("migrateSharedSteps", e.currentTarget.checked)}
           />
+          )}
           {testrail && (
           <Switch
             label="Include deleted cases"
@@ -212,6 +234,10 @@ export function OptionsStep() {
                   ? "Higher is faster but puts more load on Jira, Xray and Allure TestOps."
                   : alm
                   ? "Higher is faster but puts more load on ALM and Allure TestOps."
+                  : squad
+                  ? "Higher is faster but puts more load on Allure TestOps. Jira and Zephyr Squad are read before writing starts, paced by \"Requests per minute\" (Connections)."
+                  : zephyr
+                  ? "Higher is faster but puts more load on Allure TestOps. Zephyr is read before writing starts, paced by \"Requests per minute\" (Connections)."
                   : "Higher is faster but puts more load on both servers. The TestRail rate limit (step 1) caps the pace regardless of this value."
             }
             min={1}

@@ -237,6 +237,10 @@ export class Run {
           ? "Reading the XML file"
           : profile.source === "xray"
             ? "Connecting to Jira and Xray"
+            : profile.source === "zephyr"
+              ? "Connecting to Jira and Zephyr"
+            : profile.source === "squad"
+              ? "Connecting to Jira and Zephyr Squad"
             : profile.source === "qase"
               ? "Connecting to Qase"
               : profile.source === "alm"
@@ -419,7 +423,7 @@ export class Run {
       profile,
       this.deps,
       log,
-      retryLog(profile.source === "xray" ? "Jira or Xray" : profile.source === "qase" ? "Qase" : profile.source === "alm" ? "ALM" : profile.source === "testops" ? "Source Allure TestOps" : "TestRail"),
+      retryLog(profile.source === "xray" ? "Jira or Xray" : profile.source === "zephyr" ? "Jira or Zephyr" : profile.source === "squad" ? "Jira or Zephyr Squad" : profile.source === "qase" ? "Qase" : profile.source === "alm" ? "ALM" : profile.source === "testops" ? "Source Allure TestOps" : "TestRail"),
     );
     try {
       await this.runSource(source, targetMissing);
@@ -834,6 +838,12 @@ function sourceLabelOf(profile: Profile): string {
       return `Qase project ${profile.qase.scope.projectCode || "?"}`;
     case "alm":
       return `ALM project ${profile.alm.scope.domain || "?"} / ${profile.alm.scope.project || "?"}`;
+    case "zephyr":
+      return `Zephyr project ${profile.zephyr.scope.projectKey || "?"}`;
+    case "squad": {
+      const jql = profile.squad.scope.jql.trim();
+      return `Zephyr Squad project ${profile.squad.scope.projectKey || "?"}${jql ? ` (${jql})` : ""}`;
+    }
     case "testops":
       return `Allure TestOps ${profile.testopsSource.connection.endpoint.replace(/^https?:\/\//, "").replace(/\/+$/, "") || "?"}: ${profile.testopsSource.projects.map((p) => p.sourceName).join(", ") || "no projects"}`;
     case "xray": {

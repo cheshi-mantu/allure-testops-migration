@@ -193,6 +193,8 @@ function FieldsEditor() {
   const xray = profile.source === "xray";
   const qase = profile.source === "qase";
   const alm = profile.source === "alm";
+  const zephyr = profile.source === "zephyr";
+  const squad = profile.source === "squad";
   const longText = (f: TestRailFieldInfo) => ["text", "steps", "url"].includes(f.kind);
   const groups: { title: string; hint: string; fields: TestRailFieldInfo[] }[] = csv
     ? [
@@ -204,12 +206,14 @@ function FieldsEditor() {
           fields: visible,
         },
       ]
-    : xray
+    : xray || squad
       ? [
           {
-            title: "Xray test details",
-            hint: "Steps of Manual tests, definitions of Cucumber and Generic tests, preconditions, test sets and plans. The folder is mapped on the Folders step.",
-            fields: visible.filter((f) => f.systemName.startsWith("xray:")),
+            title: xray ? "Xray test details" : "Zephyr Squad steps",
+            hint: xray
+              ? "Steps of Manual tests, definitions of Cucumber and Generic tests, preconditions, test sets and plans. The folder is mapped on the Folders step."
+              : "Step, test data and expected result of every step, with the files of the steps.",
+            fields: visible.filter((f) => f.systemName.startsWith(xray ? "xray:" : "squad:")),
           },
           {
             title: "Jira text",
@@ -230,6 +234,34 @@ function FieldsEditor() {
             title: "Other Jira fields",
             hint: "Short free text, numbers and dates.",
             fields: visible.filter((f) => f.systemName.startsWith("jira:") && !f.systemName.startsWith("jira:link:") && f.options === null && !longText(f)),
+          },
+        ]
+      : zephyr
+      ? [
+          {
+            title: "Test script and text",
+            hint: "A test case has steps, or a plain text or BDD script: map both to the scenario. Rich text is converted to Markdown with its pictures.",
+            fields: visible.filter((f) => longText(f) && !f.systemName.startsWith("zephyr:cf:") && f.systemName !== "zephyr:webLinks"),
+          },
+          {
+            title: "Fields with a list of values",
+            hint: "Status, priority, labels, component and owner. Each value can be renamed or skipped. Values not listed in the mapping keep their Zephyr name.",
+            fields: visible.filter((f) => !f.systemName.startsWith("zephyr:cf:") && f.options !== null && !longText(f)),
+          },
+          {
+            title: "Linked issues and web links",
+            hint: "Jira issues by link type, and web links. Issues a test case covers fit Allure TestOps issues of a Jira integration.",
+            fields: visible.filter((f) => f.systemName.startsWith("zephyr:issues:") || f.systemName === "zephyr:webLinks"),
+          },
+          {
+            title: "Custom fields",
+            hint: "Zephyr gives the values of custom fields, not their settings: the kind of each field is told by the values of the sampled test cases. Change the target if it is guessed wrong.",
+            fields: visible.filter((f) => f.systemName.startsWith("zephyr:cf:")),
+          },
+          {
+            title: "Other fields",
+            hint: "Estimated time, creation date and the folder path. The folder is mapped on the Folders step.",
+            fields: visible.filter((f) => f.systemName.startsWith("zephyr:") && !f.systemName.startsWith("zephyr:cf:") && !f.systemName.startsWith("zephyr:issues:") && f.systemName !== "zephyr:webLinks" && f.options === null && !longText(f)),
           },
         ]
       : [
@@ -259,6 +291,10 @@ function FieldsEditor() {
             ? `Choose where each ${unit} goes. Examples and counts come from all ${discovery.sampledCases} case(s) of the file.`
             : xray
               ? `Choose where each attribute of the Xray tests goes: Xray details and every Jira field used by the tests. Examples and counts come from ${discovery.sampledCases} sampled test(s).`
+              : squad
+                ? `Choose where each attribute of the Zephyr Squad tests goes: the steps and every Jira field used by the tests. Examples and counts come from ${discovery.sampledCases} sampled test(s).`
+              : zephyr
+                ? `Choose where each attribute of the Zephyr test cases goes: script, text, statuses, priorities, linked issues and the custom fields of the project. Examples and counts come from ${discovery.sampledCases} sampled test case(s).`
               : alm
                 ? `Choose where each field of the ALM tests goes: design steps, parameters, system fields and the user fields of the project, by the labels the project gave them. Examples and counts come from ${discovery.sampledCases} sampled test(s).`
               : qase
@@ -367,7 +403,7 @@ function FieldRow({
               </Tooltip>
             )}
             {!field.system && field.kind !== "column" && !xml && (
-              <Tooltip label={profile.source === "xray" ? "Custom field in Jira" : profile.source === "qase" ? "Custom field in Qase" : profile.source === "alm" ? "User field of the ALM project" : "Custom field in TestRail"}>
+              <Tooltip label={profile.source === "xray" || profile.source === "squad" ? "Custom field in Jira" : profile.source === "qase" ? "Custom field in Qase" : profile.source === "alm" ? "User field of the ALM project" : profile.source === "zephyr" ? "Custom field in Zephyr" : "Custom field in TestRail"}>
                 <Badge size="xs" variant="dot" color="gray">
                   custom
                 </Badge>
@@ -387,8 +423,8 @@ function FieldRow({
                 ? `Filled in ${field.filledCount} row(s)`
                 : "Empty in every row"
               : field.filledCount
-                ? `Filled in ${field.filledCount} of ${sampled} sampled ${profile.source === "xray" ? "tests" : "cases"}`
-                : `Empty in all sampled ${profile.source === "xray" ? "tests" : "cases"}`}
+                ? `Filled in ${field.filledCount} of ${sampled} sampled ${profile.source === "xray" || profile.source === "squad" ? "tests" : profile.source === "zephyr" ? "test cases" : "cases"}`
+                : `Empty in all sampled ${profile.source === "xray" || profile.source === "squad" ? "tests" : profile.source === "zephyr" ? "test cases" : "cases"}`}
           </Text>
           {field.examples.length > 0 && (
             <Stack gap={2} mt={6}>
@@ -643,7 +679,7 @@ function ValueTable({
     <Table mt="sm" verticalSpacing={4}>
       <Table.Thead>
         <Table.Tr>
-          <Table.Th>{profile.source === "csv" ? "CSV value" : profile.source === "xml" ? "Value in the file" : profile.source === "xray" ? "Jira or Xray value" : profile.source === "qase" ? "Qase value" : profile.source === "alm" ? "ALM value" : "TestRail value"}</Table.Th>
+          <Table.Th>{profile.source === "csv" ? "CSV value" : profile.source === "xml" ? "Value in the file" : profile.source === "xray" ? "Jira or Xray value" : profile.source === "qase" ? "Qase value" : profile.source === "alm" ? "ALM value" : profile.source === "zephyr" ? "Zephyr value" : profile.source === "squad" ? "Jira or Zephyr Squad value" : "TestRail value"}</Table.Th>
           <Table.Th w={90}>In sample</Table.Th>
           <Table.Th w="45%">Allure TestOps value</Table.Th>
           <Table.Th w={90}>Skip</Table.Th>

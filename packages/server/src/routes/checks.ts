@@ -4,7 +4,10 @@ import { TestOpsClient } from "../testops/client.js";
 import { TestRailClient } from "../testrail/client.js";
 import { AlmClient } from "../alm/client.js";
 import { QaseClient } from "../qase/client.js";
-import { JiraClient, XrayClient } from "../xray/client.js";
+import { JiraClient } from "../jira/client.js";
+import { XrayClient } from "../xray/client.js";
+import { failureText, ZephyrClient } from "../zephyr/client.js";
+import { ZapiClient } from "../squad/client.js";
 
 export interface CheckResult extends ConnectionCheck {
   /** `key` for Jira projects. */
@@ -158,4 +161,106 @@ export async function checkTestOps(profile: Profile): Promise<CheckResult> {
   } catch (error) {
     return { ok: false, message: explain(error, "Allure TestOps"), projects: [] };
   }
+}
+
+/** Zephyr API token and Jira account; returns the Jira projects Zephyr is turned on for. */
+export async function checkZephyr(profile: Profile): Promise<CheckResult> {
+  const connection = profile.zephyr.connection;
+  if (!connection.jiraUrl || !connection.jiraEmail || !connection.jiraApiToken) {
+    return { ok: false, message: "Enter the Jira site, the email and the API token.", projects: [] };
+  }
+  if (!connection.apiToken.trim()) {
+    return { ok: false, message: "Enter the Zephyr API access token.", projects: [] };
+  }
+  // Every step of the check, for the detailed log the user can copy and send.
+  const lines: string[] = [];
+  const started = Date.now();
+  const trace = (message: string) => lines.push(`+${((Date.now() - started) / 1000).toFixed(2)}s ${message}`);
+  const details = () => (profile.zephyr.detailedLog ? lines.join("\n") : undefined);
+  const result = (ok: boolean, message: string, projects: CheckResult["projects"] = []): CheckResult => ({ ok, message, projects, ...(details() ? { details: details() } : {}) });
+  trace(`Zephyr API ${connection.endpoint}, Jira ${connection.jiraUrl}. Tool on Node.js ${process.version}.`);
+  const jira = new JiraClient(connection);
+  let user: string;
+  let jiraProjects: { id: string; key: string; name: string }[];
+  try {
+    const me = await jira.myself();
+    user = me.displayName ?? me.emailAddress ?? connection.jiraEmail;
+    jiraProjects = await jira.projects();
+    trace(`Jira: logged in, ${jiraProjects.length} project(s) visible.`);
+  } catch (error) {
+    trace(`Jira: ${failureText(error)}.`);
+    return result(false, explain(error, "Jira"));
+  }
+  try {
+    const zephyr = new ZephyrClient(connection, { trace });
+    const enabled = (await zephyr.projects()).filter((project) => project.enabled !== false);
+    const names = new Map(jiraProjects.map((project) => [project.key, project]));
+    trace(`Zephyr projects: ${enabled.map((project) => `${project.key}${names.has(project.key) ? "" : " (not visible in Jira)"}`).join(", ") || "none"}.`);
+    if (enabled.length === 0) {
+      return result(
+        true,
+        `Connected to Jira as ${user} and to Zephyr, but Zephyr is turned on for no project. Turn it on in the Jira project settings (Apps, Zephyr). Projects of the old Zephyr Squad, where tests are Jira issues, are not read by this source.`,
+      );
+    }
+    return result(
+      true,
+      `Connected to Jira as ${user} and to Zephyr. ${enabled.length} project(s) with Zephyr available.`,
+      enabled
+        .map((project) => ({ id: project.id, key: project.key, name: `${names.get(project.key)?.name ?? project.key} (${project.key})` }))
+        .sort((a, b) => a.name.localeCompare(b.name)),
+    );
+  } catch (error) {
+    const hint =
+      error instanceof HttpError && error.status === 401
+        ? "Zephyr rejected the API access token. Check the token, and that the API address matches your Zephyr: Zephyr Essential tokens work with the Zephyr Essential address, tokens of Zephyr in the EU, Australia or Germany with the address of that region."
+        : explain(error, "Zephyr");
+    return result(false, `Jira works (as ${user}), but ${hint}`);
+  }
+}
+
+/** Jira account and Zephyr Squad API keys; returns the Jira projects the account can see. */
+export async function checkSquad(profile: Profile): Promise<CheckResult> {
+  const connection = profile.squad.connection;
+  if (!connection.jiraUrl || !connection.jiraEmail || !connection.jiraApiToken) {
+    return { ok: false, message: "Enter the Jira site, the email and the API token.", projects: [] };
+  }
+  if (!connection.accessKey.trim() || !connection.secretKey.trim()) {
+    return { ok: false, message: "Enter the access key and the secret key of the Zephyr Squad API keys.", projects: [] };
+  }
+  const lines: string[] = [];
+  const started = Date.now();
+  const trace = (message: string) => lines.push(`+${((Date.now() - started) / 1000).toFixed(2)}s ${message}`);
+  const details = () => (profile.squad.detailedLog ? lines.join("\n") : undefined);
+  const result = (ok: boolean, message: string, projects: CheckResult["projects"] = []): CheckResult => ({ ok, message, projects, ...(details() ? { details: details() } : {}) });
+  trace(`Zephyr Squad API ${connection.endpoint}, Jira ${connection.jiraUrl}. Tool on Node.js ${process.version}.`);
+  const jira = new JiraClient(connection);
+  let user: string;
+  let accountId: string;
+  let projects: { id: string; key: string; name: string }[];
+  try {
+    const me = await jira.myself();
+    user = me.displayName ?? me.emailAddress ?? connection.jiraEmail;
+    accountId = me.accountId;
+    projects = await jira.projects();
+    trace(`Jira: logged in, ${projects.length} project(s) visible.`);
+  } catch (error) {
+    trace(`Jira: ${failureText(error)}.`);
+    return result(false, explain(error, "Jira"));
+  }
+  try {
+    const zapi = new ZapiClient(connection, { trace });
+    zapi.signFor(accountId);
+    await zapi.serverInfo();
+  } catch (error) {
+    const hint =
+      error instanceof HttpError && (error.status === 401 || error.status === 403)
+        ? "Zephyr Squad rejected the API keys. Check the access key and the secret key, and that they belong to the same Jira user as the email above: requests are signed for that user."
+        : explain(error, "Zephyr Squad");
+    return result(false, `Jira works (as ${user}), but ${hint}`);
+  }
+  return result(
+    true,
+    `Connected to Jira as ${user} and to Zephyr Squad. ${projects.length} project(s) available.`,
+    projects.map((p) => ({ id: Number(p.id), key: p.key, name: `${p.name} (${p.key})` })).sort((a, b) => a.name.localeCompare(b.name)),
+  );
 }

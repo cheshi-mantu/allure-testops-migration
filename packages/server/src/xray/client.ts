@@ -1,6 +1,6 @@
 import type { XrayConnection } from "@atm/shared";
 import { HttpClient, HttpError, type RetryInfo } from "../http/httpClient.js";
-import type { JiraField, JiraIssue, JiraProject, JiraSearchPage, JiraUser, XrayResults, XrayTest } from "./types.js";
+import type { XrayResults, XrayTest } from "./types.js";
 
 /** Xray answers GraphQL errors with status 200 and an `errors` list. */
 export class XrayQueryError extends HttpError {
@@ -121,87 +121,4 @@ export class XrayClient {
   async download(link: string): Promise<{ data: Buffer; contentType: string | null; fileName: string | null }> {
     return this.withToken(() => this.http.bytes(link));
   }
-}
-
-/** Jira Cloud REST v3 with an Atlassian API token. */
-export class JiraClient {
-  readonly http: HttpClient;
-
-  constructor(connection: XrayConnection, onRetry?: (info: RetryInfo) => void) {
-    const basic = Buffer.from(`${connection.jiraEmail}:${connection.jiraApiToken}`).toString("base64");
-    this.http = new HttpClient({ baseUrl: connection.jiraUrl, headers: { Authorization: `Basic ${basic}` }, onRetry });
-  }
-
-  get endpoint(): string {
-    return this.http.baseUrl;
-  }
-
-  issueUrl(key: string): string {
-    return `${this.http.baseUrl}browse/${key}`;
-  }
-
-  myself(): Promise<JiraUser> {
-    return this.http.get<JiraUser>("rest/api/3/myself");
-  }
-
-  async projects(): Promise<JiraProject[]> {
-    const projects: JiraProject[] = [];
-    for (let startAt = 0; ; ) {
-      const page = await this.http.get<{ values: JiraProject[]; isLast?: boolean; total?: number }>("rest/api/3/project/search", { startAt, maxResults: 100 });
-      projects.push(...(page.values ?? []));
-      if (page.isLast !== false || (page.values ?? []).length === 0) {
-        return projects;
-      }
-      startAt += page.values.length;
-    }
-  }
-
-  fields(): Promise<JiraField[]> {
-    return this.http.get<JiraField[]>("rest/api/3/field");
-  }
-
-  /** Issues matching the JQL with all fields and rendered rich text, page by page. */
-  async *search(jql: string, options: { pageSize?: number; limit?: number; fields?: string[] } = {}): AsyncGenerator<JiraIssue[]> {
-    let nextPageToken: string | null = null;
-    const seen = new Set<string>();
-    let count = 0;
-    for (;;) {
-      const pageSize = Math.min(options.pageSize ?? 100, options.limit !== undefined ? options.limit - count : Infinity);
-      if (pageSize <= 0) {
-        return;
-      }
-      const page: JiraSearchPage = await this.http.json<JiraSearchPage>("POST", "rest/api/3/search/jql", {
-        body: { jql, maxResults: pageSize, fields: options.fields ?? ["*all"], expand: "renderedFields", nextPageToken },
-      });
-      const issues = (page.issues ?? []).filter((issue) => !seen.has(issue.id));
-      issues.forEach((issue) => seen.add(issue.id));
-      count += issues.length;
-      if (issues.length > 0) {
-        yield issues;
-      }
-      // Guard against a token that keeps pointing at pages already read.
-      if (page.isLast || !page.nextPageToken || page.nextPageToken === nextPageToken || issues.length === 0) {
-        return;
-      }
-      nextPageToken = page.nextPageToken;
-    }
-  }
-
-  download(url: string): Promise<{ data: Buffer; contentType: string | null; fileName: string | null }> {
-    return this.http.bytes(url);
-  }
-}
-
-const quote = (value: string) => `"${value.replace(/"/g, '\\"')}"`;
-
-/** JQL for the tests of a scope, in key order so runs read in a stable order. */
-export function scopeJql(projectKey: string, issueType: string, filter: string, issueKeys: string[] = []): string {
-  const parts = [`project = ${quote(projectKey)}`, `issuetype = ${quote(issueType)}`];
-  if (issueKeys.length > 0) {
-    parts.push(`key in (${issueKeys.map(quote).join(", ")})`);
-  }
-  if (filter.trim()) {
-    parts.push(`(${filter.trim()})`);
-  }
-  return `${parts.join(" AND ")} ORDER BY key ASC`;
 }
